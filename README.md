@@ -6,7 +6,7 @@
 
 This repository currently contains the Milestone 1 project skeleton:
 
-- Go CLI entrypoint at `cmd/kh`
+- Go CLI entrypoint at `cmd/kgh`
 - Internal package layout for future implementation
 - Basic Go CI in GitHub Actions
 
@@ -14,6 +14,6 @@ This repository currently contains the Milestone 1 project skeleton:
 
 ```bash
 go test ./...
-go build ./cmd/kh
-./kh version
+go build ./cmd/kgh
+./kgh version
 ```

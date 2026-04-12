@@ -1,8 +1,8 @@
-# PRD: `kh` v1 — PR-native Kaggle Submit MVP
+# PRD: `kgh` v1 — PR-native Kaggle Submit MVP
 
 ## 1. Overview
 
-`kh` is a GitHub-native developer tool for Kaggle workflows.
+`kgh` is a GitHub-native developer tool for Kaggle workflows.
 
 The v1 goal is to let a developer trigger a Kaggle notebook/kernel run from GitHub, optionally submit the resulting `submission.csv` to a Kaggle competition, and surface the result back into GitHub through Action Summary and PR comments.
 
@@ -12,7 +12,7 @@ The core product idea is simple:
 * Kaggle remains the execution environment for notebook runs and GPU-backed workloads
 * Pull requests become the place where experiment outcomes are reviewed
 
-In v1, `kh` is intentionally narrow. It does not try to be a Kaggle platform, experiment tracker, or notebook synchronization suite. It focuses on one high-value loop:
+In v1, `kgh` is intentionally narrow. It does not try to be a Kaggle platform, experiment tracker, or notebook synchronization suite. It focuses on one high-value loop:
 
 1. select a target from GitHub
 2. run it on Kaggle
@@ -39,7 +39,7 @@ This creates several problems:
 * comparing PR branch vs base branch performance is manual and error-prone
 * existing Kaggle GitHub integrations are mostly wrappers around Kaggle primitives, not developer workflow tools
 
-`kh` v1 addresses this by turning a PR into a lightweight experiment review surface.
+`kgh` v1 addresses this by turning a PR into a lightweight experiment review surface.
 
 ---
 
@@ -47,7 +47,7 @@ This creates several problems:
 
 ### Primary goals
 
-`kh` v1 must:
+`kgh` v1 must:
 
 * allow a user to trigger a Kaggle run from GitHub
 * resolve a specific target notebook/kernel from repository config
@@ -62,7 +62,7 @@ This creates several problems:
 
 ### Secondary goals
 
-`kh` v1 should:
+`kgh` v1 should:
 
 * be easy to adopt in a single repository
 * avoid introducing any database or external backend
@@ -123,11 +123,11 @@ GitHub is the source of truth for notebooks, configuration, and review.
 
 ### 7.2 Kaggle-native execution
 
-`kh` does not try to replace Kaggle compute. It orchestrates Kaggle execution and submissions.
+`kgh` does not try to replace Kaggle compute. It orchestrates Kaggle execution and submissions.
 
 ### 7.3 Explicit over magical
 
-`kh` should not guess which notebook to run. Target selection must be explicit.
+`kgh` should not guess which notebook to run. Target selection must be explicit.
 
 ### 7.4 Low operational burden
 
@@ -171,7 +171,7 @@ This is the main v1 UX because it is:
 
 ### 8.2 Target resolution
 
-Targets are defined in repository config under `.kh/config.yaml`.
+Targets are defined in repository config under `.kgh/config.yaml`.
 
 Example:
 
@@ -196,7 +196,7 @@ targets:
       metrics: metrics.json
 ```
 
-When `submit: exp142` is encountered, `kh` resolves the target, merges supported runtime overrides, and builds the final execution spec.
+When `submit: exp142` is encountered, `kgh` resolves the target, merges supported runtime overrides, and builds the final execution spec.
 
 ### 8.3 Workflow dispatch
 
@@ -212,10 +212,10 @@ PR labels are not the primary v1 path. They may be used later as re-run helpers,
 
 ## 9.1 Configuration
 
-`kh` must support a repository-level config file at:
+`kgh` must support a repository-level config file at:
 
 ```text
-.kh/config.yaml
+.kgh/config.yaml
 ```
 
 v1 config must support:
@@ -232,13 +232,13 @@ v1 config must support:
 * dataset sources
 * expected outputs
 
-`kh` must validate config structure and fail with actionable errors on invalid configuration.
+`kgh` must validate config structure and fail with actionable errors on invalid configuration.
 
 ---
 
 ## 9.2 Commit message parsing
 
-`kh` must parse commit messages in the form:
+`kgh` must parse commit messages in the form:
 
 ```text
 submit: <target> [gpu=<bool>] [internet=<bool>]
@@ -256,7 +256,7 @@ v1 parser requirements:
 
 ## 9.3 Target resolution
 
-`kh` must:
+`kgh` must:
 
 * look up the referenced target in config
 * merge allowed overrides
@@ -270,7 +270,7 @@ Changed files may be used for validation or reporting, but not for target infere
 
 ## 9.4 Execution spec generation
 
-`kh` must generate Kaggle execution metadata dynamically for each run.
+`kgh` must generate Kaggle execution metadata dynamically for each run.
 
 This includes building a valid `kernel-metadata.json` in a temporary working directory, derived from:
 
@@ -286,7 +286,7 @@ The notebook itself must not be modified in place by v1.
 
 ## 9.5 Kaggle execution
 
-`kh` must:
+`kgh` must:
 
 * authenticate to Kaggle via GitHub secrets-backed credentials
 * push the execution bundle to Kaggle
@@ -297,7 +297,7 @@ The notebook itself must not be modified in place by v1.
 
 ## 9.6 Output retrieval
 
-After a successful Kaggle execution, `kh` must:
+After a successful Kaggle execution, `kgh` must:
 
 * download kernel outputs
 * look for configured outputs such as:
@@ -306,25 +306,25 @@ After a successful Kaggle execution, `kh` must:
   * `metrics.json`
 * make these outputs available to later steps
 
-If expected outputs are missing, `kh` must report this clearly.
+If expected outputs are missing, `kgh` must report this clearly.
 
 ---
 
 ## 9.7 Competition submission
 
-If the resolved target has `submit: true` and `submission.csv` exists, `kh` must:
+If the resolved target has `submit: true` and `submission.csv` exists, `kgh` must:
 
 * submit the output to the configured Kaggle competition
 * associate the submit step with the current run context
 * return submission metadata for reporting
 
-If `submit: false`, `kh` must skip this step cleanly.
+If `submit: false`, `kgh` must skip this step cleanly.
 
 ---
 
 ## 9.8 Score retrieval
 
-After submission, `kh` must:
+After submission, `kgh` must:
 
 * retrieve the latest relevant Kaggle submission result
 * extract at minimum:
@@ -340,7 +340,7 @@ v1 only requires public score handling.
 
 ## 9.9 GitHub reporting
 
-`kh` must write:
+`kgh` must write:
 
 ### GitHub Actions Summary
 
@@ -356,7 +356,7 @@ Include:
 
 ### PR comment
 
-`kh` must create or update a single bot comment on the PR including:
+`kgh` must create or update a single bot comment on the PR including:
 
 * target name
 * resolved configuration summary
@@ -371,7 +371,7 @@ The PR comment must be updated in place on re-runs rather than duplicated.
 
 ## 9.10 Baseline comparison
 
-`kh` must compare the current score to the latest successful result from the base branch.
+`kgh` must compare the current score to the latest successful result from the base branch.
 
 v1 comparison requirements:
 
@@ -388,7 +388,7 @@ v1 must not depend on a database to store history.
 
 ## 10.1 High-level architecture
 
-`kh` v1 will be a **Go CLI** with a **thin GitHub Action wrapper**.
+`kgh` v1 will be a **Go CLI** with a **thin GitHub Action wrapper**.
 
 This architecture is preferred because:
 
@@ -431,10 +431,10 @@ Handles:
 ## 10.3 Proposed repo structure
 
 ```text
-.kh/
+.kgh/
   config.yaml
 
-cmd/kh/
+cmd/kgh/
 internal/
   config/
   parser/
@@ -449,7 +449,7 @@ internal/
 
 ## 10.4 Core command flow
 
-A typical `kh` CI run should follow this internal flow:
+A typical `kgh` CI run should follow this internal flow:
 
 1. parse trigger input
 2. load config
@@ -472,9 +472,9 @@ Security is a core v1 requirement.
 
 ### 11.1 Secrets handling
 
-`kh` must use Kaggle credentials from GitHub Secrets or environment variables.
+`kgh` must use Kaggle credentials from GitHub Secrets or environment variables.
 
-`kh` must never log sensitive values in plain text.
+`kgh` must never log sensitive values in plain text.
 
 ### 11.2 Fork PR safety
 
@@ -494,7 +494,7 @@ GitHub permissions should be minimized. v1 should require only what is needed fo
 
 ### 11.4 Safe failure
 
-When credentials are missing, config is invalid, or execution cannot proceed, `kh` must fail with a clear explanation rather than silently skipping critical behavior.
+When credentials are missing, config is invalid, or execution cannot proceed, `kgh` must fail with a clear explanation rather than silently skipping critical behavior.
 
 ---
 
@@ -502,7 +502,7 @@ When credentials are missing, config is invalid, or execution cannot proceed, `k
 
 v1 will be considered successful if the following are true in a real sample repo:
 
-* a repository can define at least one target in `.kh/config.yaml`
+* a repository can define at least one target in `.kgh/config.yaml`
 * a commit message `submit: <target>` triggers a Kaggle run
 * a Kaggle kernel executes successfully
 * outputs are downloaded successfully
@@ -585,9 +585,9 @@ Using latest successful base run is simple but limited.
 
 ## 15. Definition of Done
 
-`kh` v1 is done when:
+`kgh` v1 is done when:
 
-* a user can define one or more targets in `.kh/config.yaml`
+* a user can define one or more targets in `.kgh/config.yaml`
 * `submit: <target>` triggers a fully resolved Kaggle workflow
 * a Kaggle run can execute successfully
 * outputs can be fetched
@@ -617,4 +617,4 @@ The following are logical post-v1 extensions:
 
 ## 17. One-line Product Statement
 
-**`kh` lets developers run Kaggle notebooks from GitHub and review submission results directly in pull requests.**
+**`kgh` lets developers run Kaggle notebooks from GitHub and review submission results directly in pull requests.**
