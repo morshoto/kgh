@@ -1,16 +1,5 @@
 version: 2
 updates:
-    # - package-ecosystem: "npm"
-    #   directory: "/frontend"
-    #   schedule:
-    #     interval: "weekly"
-
-    # # Enable version updates for Docker in the frontend directory (if applicable)
-    # - package-ecosystem: "docker"
-    #   directory: "/frontend"
-    #   schedule:
-    #     interval: "weekly"
-
     - package-ecosystem: gomod
       directory: /
       schedule:
