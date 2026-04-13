@@ -3,6 +3,8 @@ package kaggle
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -243,6 +245,82 @@ func TestClientRunReturnsExecutableLookupError(t *testing.T) {
 	var notFoundErr *ExecutableNotFoundError
 	if !errors.As(err, &notFoundErr) {
 		t.Fatalf("expected ExecutableNotFoundError, got %T", err)
+	}
+}
+
+func TestClientRunSupportsTokenAuth(t *testing.T) {
+	t.Parallel()
+
+	runner := &clientFakeRunner{
+		t: t,
+		runFn: func(ctx context.Context, cmd command) (Result, error) {
+			if !reflect.DeepEqual(cmd.Args, []string{"/usr/local/bin/kaggle", "kernels", "status"}) {
+				t.Fatalf("unexpected args %#v", cmd.Args)
+			}
+			wantEnv := []string{
+				"PATH=/usr/bin",
+				"KAGGLE_API_TOKEN=secret-token",
+			}
+			if !reflect.DeepEqual(cmd.Env, wantEnv) {
+				t.Fatalf("unexpected env %#v", cmd.Env)
+			}
+			if _, ok := ctx.Deadline(); !ok {
+				t.Fatal("expected context deadline to be set")
+			}
+			return Result{ExitCode: 0}, nil
+		},
+	}
+
+	client := NewClientWithDeps(
+		runner,
+		staticEnvSource{
+			envKaggleAPIToken: "secret-token",
+		},
+		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
+		func() []string { return []string{"PATH=/usr/bin"} },
+		time.Second,
+	)
+
+	if _, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{}); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestClientRunSetsConfigDirForFileCredentials(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, accessTokenFilename), []byte("token-from-file"), 0o644); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+
+	runner := &clientFakeRunner{
+		t: t,
+		runFn: func(ctx context.Context, cmd command) (Result, error) {
+			wantEnv := []string{
+				"PATH=/usr/bin",
+				"KAGGLE_API_TOKEN=token-from-file",
+				"KAGGLE_CONFIG_DIR=" + dir,
+			}
+			if !reflect.DeepEqual(cmd.Env, wantEnv) {
+				t.Fatalf("unexpected env %#v", cmd.Env)
+			}
+			return Result{ExitCode: 0}, nil
+		},
+	}
+
+	client := NewClientWithDeps(
+		runner,
+		staticEnvSource{
+			envKaggleConfigDir: dir,
+		},
+		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
+		func() []string { return []string{"PATH=/usr/bin"} },
+		time.Second,
+	)
+
+	if _, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{}); err != nil {
+		t.Fatalf("expected no error, got %v", err)
 	}
 }
 
