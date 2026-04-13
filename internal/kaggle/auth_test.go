@@ -260,7 +260,9 @@ func TestPrepareRuntimeToken(t *testing.T) {
 		t.Fatalf("unexpected setup metadata %+v", setup)
 	}
 	assertEnvContains(t, setup.Env, envKaggleConfigDir, setup.ConfigDir)
-	assertEnvContains(t, setup.Env, envKaggleAPIToken, "token-value")
+	assertEnvMissing(t, setup.Env, envKaggleAPIToken)
+	assertEnvMissing(t, setup.Env, envKaggleUsername)
+	assertEnvMissing(t, setup.Env, envKaggleKey)
 
 	dirInfo, err := os.Stat(setup.ConfigDir)
 	if err != nil {
@@ -304,8 +306,9 @@ func TestPrepareRuntimeLegacy(t *testing.T) {
 	}()
 
 	assertEnvContains(t, setup.Env, envKaggleConfigDir, setup.ConfigDir)
-	assertEnvContains(t, setup.Env, envKaggleUsername, "alice")
-	assertEnvContains(t, setup.Env, envKaggleKey, "secret-key")
+	assertEnvMissing(t, setup.Env, envKaggleAPIToken)
+	assertEnvMissing(t, setup.Env, envKaggleUsername)
+	assertEnvMissing(t, setup.Env, envKaggleKey)
 
 	configPath := filepath.Join(setup.ConfigDir, kaggleJSONFilename)
 	data, err := os.ReadFile(configPath)
@@ -356,8 +359,10 @@ func TestPrepareRuntimeFromDiscoveredFileCredentials(t *testing.T) {
 	if setup.Source != CredentialSourceFileLegacy {
 		t.Fatalf("unexpected source %q", setup.Source)
 	}
-	assertEnvContains(t, setup.Env, envKaggleUsername, "alice")
-	assertEnvContains(t, setup.Env, envKaggleKey, "secret-key")
+	assertEnvContains(t, setup.Env, envKaggleConfigDir, setup.ConfigDir)
+	assertEnvMissing(t, setup.Env, envKaggleAPIToken)
+	assertEnvMissing(t, setup.Env, envKaggleUsername)
+	assertEnvMissing(t, setup.Env, envKaggleKey)
 }
 
 func TestPrepareRuntimeCleanupRemovesTempDir(t *testing.T) {
@@ -441,4 +446,15 @@ func assertEnvContains(t *testing.T, env []string, key, value string) {
 		}
 	}
 	t.Fatalf("missing %s in env %#v", key, env)
+}
+
+func assertEnvMissing(t *testing.T, env []string, key string) {
+	t.Helper()
+
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			t.Fatalf("did not expect %s in env %#v", key, env)
+		}
+	}
 }

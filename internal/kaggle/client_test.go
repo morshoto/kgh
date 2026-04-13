@@ -3,6 +3,8 @@ package kaggle
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,10 +27,19 @@ func TestClientRunSuccess(t *testing.T) {
 			}
 			assertEnvContains(t, cmd.Env, "PATH", "/usr/bin")
 			assertEnvContains(t, cmd.Env, "HOME", "/tmp/home")
-			assertEnvContains(t, cmd.Env, envKaggleUsername, "alice")
-			assertEnvContains(t, cmd.Env, envKaggleKey, "secret-key")
+			assertEnvMissing(t, cmd.Env, envKaggleAPIToken)
+			assertEnvMissing(t, cmd.Env, envKaggleUsername)
+			assertEnvMissing(t, cmd.Env, envKaggleKey)
 			if dir := envValue(cmd.Env, envKaggleConfigDir); dir == "" {
 				t.Fatalf("expected %s to be set in %#v", envKaggleConfigDir, cmd.Env)
+			} else {
+				payload, err := os.ReadFile(filepath.Join(dir, kaggleJSONFilename))
+				if err != nil {
+					t.Fatalf("read kaggle.json: %v", err)
+				}
+				if !strings.Contains(string(payload), `"username":"alice"`) || !strings.Contains(string(payload), `"key":"secret-key"`) {
+					t.Fatalf("unexpected kaggle.json content %q", string(payload))
+				}
 			}
 			if _, ok := ctx.Deadline(); !ok {
 				t.Fatal("expected context deadline to be set")
@@ -254,9 +265,19 @@ func TestClientRunSupportsTokenAuth(t *testing.T) {
 				t.Fatalf("unexpected args %#v", cmd.Args)
 			}
 			assertEnvContains(t, cmd.Env, "PATH", "/usr/bin")
-			assertEnvContains(t, cmd.Env, envKaggleAPIToken, "secret-token")
+			assertEnvMissing(t, cmd.Env, envKaggleAPIToken)
+			assertEnvMissing(t, cmd.Env, envKaggleUsername)
+			assertEnvMissing(t, cmd.Env, envKaggleKey)
 			if dir := envValue(cmd.Env, envKaggleConfigDir); dir == "" {
 				t.Fatalf("expected %s to be set in %#v", envKaggleConfigDir, cmd.Env)
+			} else {
+				token, err := os.ReadFile(filepath.Join(dir, accessTokenFilename))
+				if err != nil {
+					t.Fatalf("read access_token: %v", err)
+				}
+				if string(token) != "secret-token" {
+					t.Fatalf("unexpected token file content %q", string(token))
+				}
 			}
 			if _, ok := ctx.Deadline(); !ok {
 				t.Fatal("expected context deadline to be set")

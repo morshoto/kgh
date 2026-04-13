@@ -349,7 +349,6 @@ func prepareRuntimeWithDeps(env EnvSource, deps runtimeSetupDeps) (RuntimeSetup,
 		}
 		setup.Env = []string{
 			envKaggleConfigDir + "=" + dir,
-			envKaggleAPIToken + "=" + creds.Token,
 		}
 	case AuthModeLegacy:
 		payload, err := json.Marshal(struct {
@@ -370,8 +369,6 @@ func prepareRuntimeWithDeps(env EnvSource, deps runtimeSetupDeps) (RuntimeSetup,
 		}
 		setup.Env = []string{
 			envKaggleConfigDir + "=" + dir,
-			envKaggleUsername + "=" + creds.Username,
-			envKaggleKey + "=" + creds.Key,
 		}
 	default:
 		_ = cleanup()
