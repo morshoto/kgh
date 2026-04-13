@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"time"
 )
 
@@ -102,10 +101,15 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 		return Result{}, fmt.Errorf("kaggle client is nil")
 	}
 
-	creds, err := ResolveCredentials(c.env)
+	runtimeSetup, err := PrepareRuntime(c.env)
 	if err != nil {
 		return Result{}, err
 	}
+	defer func() {
+		if runtimeSetup.Cleanup != nil {
+			_ = runtimeSetup.Cleanup()
+		}
+	}()
 
 	binaryPath, err := resolveExecutable(kaggleBinary, c.lookPath)
 	if err != nil {
@@ -120,14 +124,9 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	commandEnv, err := commandCredentialEnv(creds)
-	if err != nil {
-		return Result{}, err
-	}
-
 	command := buildCommand(binaryPath, args, c.baseEnv(), RunOptions{
 		Dir:     opts.Dir,
-		Env:     append(commandEnv, opts.Env...),
+		Env:     append(runtimeSetup.Env, opts.Env...),
 		Timeout: timeout,
 	})
 
@@ -155,29 +154,4 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 	}
 
 	return result, fmt.Errorf("run kaggle command: %w", err)
-}
-
-func commandCredentialEnv(creds Credentials) ([]string, error) {
-	env := make([]string, 0, 3)
-
-	switch creds.Mode {
-	case AuthModeLegacy:
-		env = append(env,
-			envKaggleUsername+"="+creds.Username,
-			envKaggleKey+"="+creds.Key,
-		)
-	case AuthModeToken:
-		env = append(env, envKaggleAPIToken+"="+creds.Token)
-	default:
-		return nil, &UnsupportedAuthModeError{Mode: creds.Mode}
-	}
-
-	switch creds.Source {
-	case CredentialSourceFileToken, CredentialSourceFileLegacy:
-		if creds.Path != "" {
-			env = append(env, envKaggleConfigDir+"="+filepath.Dir(creds.Path))
-		}
-	}
-
-	return env, nil
 }
