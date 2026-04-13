@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.0.5](https://github.com/morshoto/kgh/compare/v0.0.4...v0.0.5) - 2026-04-13
+- Kaggle adapter foundation  by @morshoto in https://github.com/morshoto/kgh/pull/38
+
 ## [v0.0.4](https://github.com/morshoto/kgh/compare/v0.0.3...v0.0.4) - 2026-04-13
 - Generate kernel metadata by @morshoto in https://github.com/morshoto/kgh/pull/36
 
