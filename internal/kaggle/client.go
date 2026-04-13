@@ -101,9 +101,12 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 		return Result{}, fmt.Errorf("kaggle client is nil")
 	}
 
-	creds, err := LoadCredentials(c.env)
+	creds, err := ResolveCredentials(c.env)
 	if err != nil {
 		return Result{}, err
+	}
+	if creds.Mode != AuthModeLegacy {
+		return Result{}, &UnsupportedAuthModeError{Mode: creds.Mode}
 	}
 
 	binaryPath, err := resolveExecutable(kaggleBinary, c.lookPath)

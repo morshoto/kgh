@@ -246,6 +246,36 @@ func TestClientRunReturnsExecutableLookupError(t *testing.T) {
 	}
 }
 
+func TestClientRunRejectsTokenAuthUntilSupported(t *testing.T) {
+	t.Parallel()
+
+	client := NewClientWithDeps(
+		&clientFakeRunner{t: t},
+		staticEnvSource{
+			envKaggleAPIToken: "secret-token",
+		},
+		func(string) (string, error) {
+			t.Fatal("did not expect executable lookup")
+			return "", nil
+		},
+		func() []string { return nil },
+		time.Second,
+	)
+
+	_, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+
+	var unsupportedErr *UnsupportedAuthModeError
+	if !errors.As(err, &unsupportedErr) {
+		t.Fatalf("expected UnsupportedAuthModeError, got %T", err)
+	}
+	if unsupportedErr.Mode != AuthModeToken {
+		t.Fatalf("unexpected auth mode %q", unsupportedErr.Mode)
+	}
+}
+
 type clientFakeRunner struct {
 	t     *testing.T
 	runFn func(context.Context, command) (Result, error)
