@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.2](https://github.com/morshoto/kgh/compare/v0.0.1...v0.0.2) - 2026-04-13
+- add: go releaser file by @morshoto in https://github.com/morshoto/kgh/pull/31
+- add: commit message parser by @morshoto in https://github.com/morshoto/kgh/pull/33
+
 ## [v0.0.1](https://github.com/morshoto/kgh/commits/v0.0.1) - 2026-04-13
 - update: README by @morshoto in https://github.com/morshoto/kgh/pull/2
 - add: config and validation tests by @morshoto in https://github.com/morshoto/kgh/pull/27
