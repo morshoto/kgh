@@ -1,6 +1,7 @@
 package kaggle
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,12 +16,12 @@ func (s staticEnvSource) LookupEnv(key string) (string, bool) {
 	return v, ok
 }
 
-func TestResolveCredentialsFromEnvToken(t *testing.T) {
+func TestResolveCredentialsToken(t *testing.T) {
 	t.Parallel()
 
-	creds, err := resolveCredentialsWithDeps(staticEnvSource{
+	creds, err := ResolveCredentials(staticEnvSource{
 		envKaggleAPIToken: "token-value",
-	}, credentialResolverDeps{})
+	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -35,13 +36,13 @@ func TestResolveCredentialsFromEnvToken(t *testing.T) {
 	}
 }
 
-func TestResolveCredentialsFromEnvLegacy(t *testing.T) {
+func TestResolveCredentialsLegacy(t *testing.T) {
 	t.Parallel()
 
-	creds, err := resolveCredentialsWithDeps(staticEnvSource{
+	creds, err := ResolveCredentials(staticEnvSource{
 		envKaggleUsername: "alice",
 		envKaggleKey:      "secret-key",
-	}, credentialResolverDeps{})
+	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -52,7 +53,7 @@ func TestResolveCredentialsFromEnvLegacy(t *testing.T) {
 		t.Fatalf("unexpected source %q", creds.Source)
 	}
 	if creds.Username != "alice" || creds.Key != "secret-key" {
-		t.Fatalf("unexpected legacy credentials %#v", creds.Diagnostics())
+		t.Fatalf("unexpected credentials %+v", creds)
 	}
 }
 
@@ -61,7 +62,7 @@ func TestResolveCredentialsFromTokenFile(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, accessTokenFilename)
-	if err := os.WriteFile(path, []byte("token-from-file\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("token-from-file\n"), 0o600); err != nil {
 		t.Fatalf("write token file: %v", err)
 	}
 
@@ -76,11 +77,8 @@ func TestResolveCredentialsFromTokenFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if creds.Mode != AuthModeToken {
-		t.Fatalf("unexpected mode %q", creds.Mode)
-	}
-	if creds.Source != CredentialSourceFileToken {
-		t.Fatalf("unexpected source %q", creds.Source)
+	if creds.Mode != AuthModeToken || creds.Source != CredentialSourceFileToken {
+		t.Fatalf("unexpected credentials %+v", creds)
 	}
 	if creds.Path != path {
 		t.Fatalf("unexpected path %q", creds.Path)
@@ -92,7 +90,7 @@ func TestResolveCredentialsFromLegacyFile(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, kaggleJSONFilename)
-	if err := os.WriteFile(path, []byte(`{"username":"alice","key":"secret-key"}`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`{"username":"alice","key":"secret-key"}`), 0o600); err != nil {
 		t.Fatalf("write kaggle.json: %v", err)
 	}
 
@@ -107,39 +105,11 @@ func TestResolveCredentialsFromLegacyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if creds.Mode != AuthModeLegacy {
-		t.Fatalf("unexpected mode %q", creds.Mode)
-	}
-	if creds.Source != CredentialSourceFileLegacy {
-		t.Fatalf("unexpected source %q", creds.Source)
+	if creds.Mode != AuthModeLegacy || creds.Source != CredentialSourceFileLegacy {
+		t.Fatalf("unexpected credentials %+v", creds)
 	}
 	if creds.Path != path {
 		t.Fatalf("unexpected path %q", creds.Path)
-	}
-}
-
-func TestResolveCredentialsHonorsConfigDirOverride(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, kaggleJSONFilename)
-	if err := os.WriteFile(path, []byte(`{"username":"alice","key":"secret-key"}`), 0o644); err != nil {
-		t.Fatalf("write kaggle.json: %v", err)
-	}
-
-	creds, err := resolveCredentialsWithDeps(staticEnvSource{
-		envKaggleConfigDir: dir,
-	}, credentialResolverDeps{
-		readFile: os.ReadFile,
-		stat:     os.Stat,
-		homeDir:  func() (string, error) { return filepath.Join(t.TempDir(), "home"), nil },
-		goos:     "linux",
-	})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if creds.Path != path {
-		t.Fatalf("expected override path %q, got %q", path, creds.Path)
 	}
 }
 
@@ -147,52 +117,21 @@ func TestResolveCredentialsFallsBackToXDGOnLinux(t *testing.T) {
 	t.Parallel()
 
 	home := t.TempDir()
-	xdg := filepath.Join(home, "xdg")
-	configDir := filepath.Join(xdg, "kaggle")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	path := filepath.Join(configDir, kaggleJSONFilename)
-	if err := os.WriteFile(path, []byte(`{"username":"alice","key":"secret-key"}`), 0o644); err != nil {
-		t.Fatalf("write kaggle.json: %v", err)
-	}
-
-	creds, err := resolveCredentialsWithDeps(staticEnvSource{
-		envXDGConfigHome: xdg,
-	}, credentialResolverDeps{
-		readFile: os.ReadFile,
-		stat:     os.Stat,
-		homeDir:  func() (string, error) { return home, nil },
-		goos:     "linux",
-	})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if creds.Path != path {
-		t.Fatalf("expected XDG path %q, got %q", path, creds.Path)
-	}
-}
-
-func TestResolveCredentialsFallsBackToXDGEvenWhenDotKaggleDirExists(t *testing.T) {
-	t.Parallel()
-
-	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, ".kaggle"), 0o755); err != nil {
-		t.Fatalf("mkdir empty .kaggle dir: %v", err)
+		t.Fatalf("mkdir .kaggle: %v", err)
 	}
-
-	xdg := filepath.Join(home, "xdg")
-	configDir := filepath.Join(xdg, "kaggle")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatalf("mkdir xdg config dir: %v", err)
+	xdgRoot := filepath.Join(home, "xdg")
+	xdgDir := filepath.Join(xdgRoot, "kaggle")
+	if err := os.MkdirAll(xdgDir, 0o755); err != nil {
+		t.Fatalf("mkdir xdg dir: %v", err)
 	}
-	path := filepath.Join(configDir, accessTokenFilename)
-	if err := os.WriteFile(path, []byte("token-from-xdg"), 0o644); err != nil {
+	path := filepath.Join(xdgDir, accessTokenFilename)
+	if err := os.WriteFile(path, []byte("token-from-xdg"), 0o600); err != nil {
 		t.Fatalf("write access_token: %v", err)
 	}
 
 	creds, err := resolveCredentialsWithDeps(staticEnvSource{
-		envXDGConfigHome: xdg,
+		envXDGConfigHome: xdgRoot,
 	}, credentialResolverDeps{
 		readFile: os.ReadFile,
 		stat:     os.Stat,
@@ -202,45 +141,61 @@ func TestResolveCredentialsFallsBackToXDGEvenWhenDotKaggleDirExists(t *testing.T
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if creds.Path != path {
-		t.Fatalf("expected XDG token path %q, got %q", path, creds.Path)
-	}
-	if creds.Mode != AuthModeToken || creds.Source != CredentialSourceFileToken {
-		t.Fatalf("unexpected credentials %#v", creds.Diagnostics())
+	if creds.Source != CredentialSourceFileToken || creds.Path != path {
+		t.Fatalf("unexpected credentials %+v", creds)
 	}
 }
 
-func TestResolveCredentialsPartialEnvFailsWithoutFallingThrough(t *testing.T) {
+func TestResolveCredentialsMissing(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	path := filepath.Join(dir, kaggleJSONFilename)
-	if err := os.WriteFile(path, []byte(`{"username":"alice","key":"secret-key"}`), 0o644); err != nil {
-		t.Fatalf("write kaggle.json: %v", err)
-	}
-
-	_, err := resolveCredentialsWithDeps(staticEnvSource{
-		envKaggleUsername:  "alice",
-		envKaggleConfigDir: dir,
-	}, credentialResolverDeps{
+	_, err := resolveCredentialsWithDeps(staticEnvSource{}, credentialResolverDeps{
 		readFile: os.ReadFile,
 		stat:     os.Stat,
-		homeDir:  func() (string, error) { return "/unused", nil },
+		homeDir:  func() (string, error) { return t.TempDir(), nil },
 		goos:     "darwin",
 	})
 	if err == nil {
 		t.Fatal("expected an error")
 	}
 
-	var validationErr *CredentialValidationError
-	if !errors.As(err, &validationErr) {
-		t.Fatalf("expected CredentialValidationError, got %T", err)
+	var missingErr *MissingCredentialsError
+	if !errors.As(err, &missingErr) {
+		t.Fatalf("expected MissingCredentialsError, got %T", err)
 	}
-	if validationErr.Source != CredentialSourceEnvLegacy {
-		t.Fatalf("unexpected source %q", validationErr.Source)
+	if got := err.Error(); !strings.Contains(got, envKaggleAPIToken) || !strings.Contains(got, envKaggleUsername) || !strings.Contains(got, envKaggleKey) {
+		t.Fatalf("unexpected error %q", got)
+	}
+}
+
+func TestResolveCredentialsRejectsEmptyToken(t *testing.T) {
+	t.Parallel()
+
+	_, err := ResolveCredentials(staticEnvSource{
+		envKaggleAPIToken: "   ",
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), envKaggleAPIToken) {
+		t.Fatalf("unexpected error %q", err.Error())
+	}
+}
+
+func TestResolveCredentialsRejectsPartialLegacy(t *testing.T) {
+	t.Parallel()
+
+	_, err := ResolveCredentials(staticEnvSource{
+		envKaggleUsername: "alice",
+	})
+	if err == nil {
+		t.Fatal("expected an error")
 	}
 	if !strings.Contains(err.Error(), envKaggleKey) {
-		t.Fatalf("expected missing key in error, got %q", err.Error())
+		t.Fatalf("unexpected error %q", err.Error())
+	}
+	if strings.Contains(err.Error(), "alice") {
+		t.Fatalf("expected redacted error, got %q", err.Error())
 	}
 }
 
@@ -249,7 +204,7 @@ func TestResolveCredentialsRejectsMalformedLegacyFile(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, kaggleJSONFilename)
-	if err := os.WriteFile(path, []byte(`{bad json}`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`{bad json}`), 0o600); err != nil {
 		t.Fatalf("write malformed kaggle.json: %v", err)
 	}
 
@@ -267,82 +222,9 @@ func TestResolveCredentialsRejectsMalformedLegacyFile(t *testing.T) {
 	if !strings.Contains(err.Error(), path) {
 		t.Fatalf("expected path in error, got %q", err.Error())
 	}
-	if strings.Contains(err.Error(), "secret-key") {
-		t.Fatalf("expected redacted error, got %q", err.Error())
-	}
 }
 
-func TestResolveCredentialsRejectsIncompleteLegacyFile(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, kaggleJSONFilename), []byte(`{"username":"alice"}`), 0o644); err != nil {
-		t.Fatalf("write incomplete kaggle.json: %v", err)
-	}
-
-	_, err := resolveCredentialsWithDeps(staticEnvSource{
-		envKaggleConfigDir: dir,
-	}, credentialResolverDeps{
-		readFile: os.ReadFile,
-		stat:     os.Stat,
-		homeDir:  func() (string, error) { return "/unused", nil },
-		goos:     "darwin",
-	})
-	if err == nil {
-		t.Fatal("expected an error")
-	}
-	if !strings.Contains(err.Error(), "key") {
-		t.Fatalf("expected missing key in error, got %q", err.Error())
-	}
-	if strings.Contains(err.Error(), "alice") {
-		t.Fatalf("expected error to redact credential value, got %q", err.Error())
-	}
-}
-
-func TestResolveCredentialsRejectsEmptyTokenFile(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, accessTokenFilename), []byte(" \n"), 0o644); err != nil {
-		t.Fatalf("write empty token file: %v", err)
-	}
-
-	_, err := resolveCredentialsWithDeps(staticEnvSource{
-		envKaggleConfigDir: dir,
-	}, credentialResolverDeps{
-		readFile: os.ReadFile,
-		stat:     os.Stat,
-		homeDir:  func() (string, error) { return "/unused", nil },
-		goos:     "darwin",
-	})
-	if err == nil {
-		t.Fatal("expected an error")
-	}
-	if !strings.Contains(err.Error(), accessTokenFilename) {
-		t.Fatalf("expected token filename in error, got %q", err.Error())
-	}
-}
-
-func TestResolveCredentialsDiagnosticsAreSafe(t *testing.T) {
-	t.Parallel()
-
-	creds, err := resolveCredentialsWithDeps(staticEnvSource{
-		envKaggleAPIToken: "secret-token",
-	}, credentialResolverDeps{})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-
-	diag := creds.Diagnostics()
-	if diag.Mode != AuthModeToken || diag.Source != CredentialSourceEnvToken {
-		t.Fatalf("unexpected diagnostics %#v", diag)
-	}
-	if strings.Contains(diag.Path, "secret-token") {
-		t.Fatalf("unexpected secret in diagnostics %#v", diag)
-	}
-}
-
-func TestResolveCredentialsMissingReportsExpectedSources(t *testing.T) {
+func TestResolveCredentialsMissingMentionsCheckedPaths(t *testing.T) {
 	t.Parallel()
 
 	_, err := resolveCredentialsWithDeps(staticEnvSource{}, credentialResolverDeps{
@@ -354,12 +236,225 @@ func TestResolveCredentialsMissingReportsExpectedSources(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-
-	var missingErr *MissingCredentialsError
-	if !errors.As(err, &missingErr) {
-		t.Fatalf("expected MissingCredentialsError, got %T", err)
+	if !strings.Contains(err.Error(), "/tmp/home/.kaggle/"+accessTokenFilename) {
+		t.Fatalf("expected checked paths in error, got %q", err.Error())
 	}
-	if got := err.Error(); !strings.Contains(got, envKaggleAPIToken) || !strings.Contains(got, envKaggleUsername) || !strings.Contains(got, envKaggleKey) {
-		t.Fatalf("expected env vars in error, got %q", got)
+}
+
+func TestPrepareRuntimeToken(t *testing.T) {
+	t.Parallel()
+
+	setup, err := PrepareRuntime(staticEnvSource{
+		envKaggleAPIToken: "token-value",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	defer func() {
+		if err := setup.Cleanup(); err != nil {
+			t.Fatalf("cleanup: %v", err)
+		}
+	}()
+
+	if setup.AuthMode != AuthModeToken || setup.Source != CredentialSourceEnvToken {
+		t.Fatalf("unexpected setup metadata %+v", setup)
+	}
+	assertEnvContains(t, setup.Env, envKaggleConfigDir, setup.ConfigDir)
+	assertEnvMissing(t, setup.Env, envKaggleAPIToken)
+	assertEnvMissing(t, setup.Env, envKaggleUsername)
+	assertEnvMissing(t, setup.Env, envKaggleKey)
+
+	dirInfo, err := os.Stat(setup.ConfigDir)
+	if err != nil {
+		t.Fatalf("stat config dir: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("unexpected dir mode %o", got)
+	}
+
+	tokenPath := filepath.Join(setup.ConfigDir, accessTokenFilename)
+	data, err := os.ReadFile(tokenPath)
+	if err != nil {
+		t.Fatalf("read token file: %v", err)
+	}
+	if string(data) != "token-value" {
+		t.Fatalf("unexpected token file content %q", string(data))
+	}
+	fileInfo, err := os.Stat(tokenPath)
+	if err != nil {
+		t.Fatalf("stat token file: %v", err)
+	}
+	if got := fileInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("unexpected token file mode %o", got)
+	}
+}
+
+func TestPrepareRuntimeLegacy(t *testing.T) {
+	t.Parallel()
+
+	setup, err := PrepareRuntime(staticEnvSource{
+		envKaggleUsername: "alice",
+		envKaggleKey:      "secret-key",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	defer func() {
+		if err := setup.Cleanup(); err != nil {
+			t.Fatalf("cleanup: %v", err)
+		}
+	}()
+
+	assertEnvContains(t, setup.Env, envKaggleConfigDir, setup.ConfigDir)
+	assertEnvMissing(t, setup.Env, envKaggleAPIToken)
+	assertEnvMissing(t, setup.Env, envKaggleUsername)
+	assertEnvMissing(t, setup.Env, envKaggleKey)
+
+	configPath := filepath.Join(setup.ConfigDir, kaggleJSONFilename)
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read kaggle.json: %v", err)
+	}
+
+	var payload struct {
+		Username string `json:"username"`
+		Key      string `json:"key"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("unmarshal kaggle.json: %v", err)
+	}
+	if payload.Username != "alice" || payload.Key != "secret-key" {
+		t.Fatalf("unexpected payload %+v", payload)
+	}
+
+	fileInfo, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("stat kaggle.json: %v", err)
+	}
+	if got := fileInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("unexpected kaggle.json mode %o", got)
+	}
+}
+
+func TestPrepareRuntimeFromDiscoveredFileCredentials(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, kaggleJSONFilename), []byte(`{"username":"alice","key":"secret-key"}`), 0o600); err != nil {
+		t.Fatalf("write kaggle.json: %v", err)
+	}
+
+	setup, err := PrepareRuntime(staticEnvSource{
+		envKaggleConfigDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	defer func() {
+		if err := setup.Cleanup(); err != nil {
+			t.Fatalf("cleanup: %v", err)
+		}
+	}()
+
+	if setup.Source != CredentialSourceFileLegacy {
+		t.Fatalf("unexpected source %q", setup.Source)
+	}
+	assertEnvContains(t, setup.Env, envKaggleConfigDir, setup.ConfigDir)
+	assertEnvMissing(t, setup.Env, envKaggleAPIToken)
+	assertEnvMissing(t, setup.Env, envKaggleUsername)
+	assertEnvMissing(t, setup.Env, envKaggleKey)
+}
+
+func TestPrepareRuntimeCleanupRemovesTempDir(t *testing.T) {
+	t.Parallel()
+
+	setup, err := PrepareRuntime(staticEnvSource{
+		envKaggleAPIToken: "token-value",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if err := setup.Cleanup(); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+
+	if _, err := os.Stat(setup.ConfigDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected config dir removal, got %v", err)
+	}
+}
+
+func TestPrepareRuntimeFailsBeforeFilesystemWrite(t *testing.T) {
+	t.Parallel()
+
+	wrote := false
+	_, err := prepareRuntimeWithDeps(staticEnvSource{
+		envKaggleUsername: "alice",
+	}, runtimeSetupDeps{
+		mkdirTemp: func(string, string) (string, error) {
+			t.Fatal("did not expect temp dir creation")
+			return "", nil
+		},
+		writeFile: func(string, []byte, os.FileMode) error {
+			wrote = true
+			return nil
+		},
+		chmod:     func(string, os.FileMode) error { return nil },
+		removeAll: func(string) error { return nil },
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if wrote {
+		t.Fatal("did not expect filesystem write")
+	}
+}
+
+func TestPrepareRuntimeWriteFailureRedactsSecrets(t *testing.T) {
+	t.Parallel()
+
+	_, err := prepareRuntimeWithDeps(staticEnvSource{
+		envKaggleAPIToken: "secret-token",
+	}, runtimeSetupDeps{
+		mkdirTemp: func(string, string) (string, error) { return "/tmp/runtime", nil },
+		writeFile: func(string, []byte, os.FileMode) error { return errors.New("disk full") },
+		chmod:     func(string, os.FileMode) error { return nil },
+		removeAll: func(string) error { return nil },
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if strings.Contains(err.Error(), "secret-token") {
+		t.Fatalf("expected redacted error, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), accessTokenFilename) {
+		t.Fatalf("expected safe path context, got %q", err.Error())
+	}
+}
+
+func assertEnvContains(t *testing.T, env []string, key, value string) {
+	t.Helper()
+
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			got := strings.TrimPrefix(entry, prefix)
+			if got != value {
+				t.Fatalf("unexpected %s value %q", key, got)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing %s in env %#v", key, env)
+}
+
+func assertEnvMissing(t *testing.T, env []string, key string) {
+	t.Helper()
+
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			t.Fatalf("did not expect %s in env %#v", key, env)
+		}
 	}
 }

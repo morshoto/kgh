@@ -33,13 +33,13 @@ const (
 type CredentialSource string
 
 const (
-	CredentialSourceEnvToken   CredentialSource = "env-token"
 	CredentialSourceEnvLegacy  CredentialSource = "env-legacy"
-	CredentialSourceFileToken  CredentialSource = "file-token"
+	CredentialSourceEnvToken   CredentialSource = "env-token"
 	CredentialSourceFileLegacy CredentialSource = "file-legacy"
+	CredentialSourceFileToken  CredentialSource = "file-token"
 )
 
-// Credentials holds the resolved Kaggle credentials plus safe source metadata.
+// Credentials holds the Kaggle auth material resolved from environment input.
 type Credentials struct {
 	Mode   AuthMode
 	Source CredentialSource
@@ -48,20 +48,6 @@ type Credentials struct {
 	Username string
 	Key      string
 	Token    string
-}
-
-type CredentialDiagnostics struct {
-	Mode   AuthMode
-	Source CredentialSource
-	Path   string
-}
-
-func (c Credentials) Diagnostics() CredentialDiagnostics {
-	return CredentialDiagnostics{
-		Mode:   c.Mode,
-		Source: c.Source,
-		Path:   c.Path,
-	}
 }
 
 // EnvSource reads environment variables by name.
@@ -78,13 +64,12 @@ func (e *MissingCredentialsError) Error() string {
 	if e == nil {
 		return "missing Kaggle credentials"
 	}
-
 	parts := make([]string, 0, 2)
 	if len(e.Missing) > 0 {
-		parts = append(parts, fmt.Sprintf("expected one of %s", strings.Join(e.Missing, ", ")))
+		parts = append(parts, strings.Join(e.Missing, ", "))
 	}
 	if len(e.Paths) > 0 {
-		parts = append(parts, fmt.Sprintf("checked %s", strings.Join(e.Paths, ", ")))
+		parts = append(parts, "checked "+strings.Join(e.Paths, ", "))
 	}
 	if len(parts) == 0 {
 		return "missing Kaggle credentials"
@@ -93,10 +78,10 @@ func (e *MissingCredentialsError) Error() string {
 }
 
 type CredentialValidationError struct {
+	Fields  []string
+	Problem string
 	Source  CredentialSource
 	Path    string
-	Missing []string
-	Problem string
 	Err     error
 }
 
@@ -104,14 +89,15 @@ func (e *CredentialValidationError) Error() string {
 	if e == nil {
 		return "invalid Kaggle credentials"
 	}
-
-	scope := string(e.Source)
-	if e.Path != "" {
-		scope = fmt.Sprintf("%s (%s)", scope, e.Path)
+	scope := "credentials"
+	if e.Source != "" {
+		scope = string(e.Source)
 	}
-
-	if len(e.Missing) > 0 {
-		return fmt.Sprintf("invalid Kaggle credentials from %s: missing %s", scope, strings.Join(e.Missing, ", "))
+	if e.Path != "" {
+		scope += " (" + e.Path + ")"
+	}
+	if len(e.Fields) > 0 {
+		return fmt.Sprintf("invalid Kaggle credentials from %s: %s", scope, strings.Join(e.Fields, ", "))
 	}
 	if e.Problem != "" {
 		return fmt.Sprintf("invalid Kaggle credentials from %s: %s", scope, e.Problem)
@@ -119,20 +105,51 @@ func (e *CredentialValidationError) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("invalid Kaggle credentials from %s: %v", scope, e.Err)
 	}
-	return fmt.Sprintf("invalid Kaggle credentials from %s", scope)
+	return "invalid Kaggle credentials"
 }
 
 func (e *CredentialValidationError) Unwrap() error { return e.Err }
 
-type UnsupportedAuthModeError struct {
-	Mode AuthMode
+type RuntimeSetup struct {
+	Env       []string
+	ConfigDir string
+	AuthMode  AuthMode
+	Source    CredentialSource
+	Cleanup   func() error
 }
 
-func (e *UnsupportedAuthModeError) Error() string {
-	if e == nil || e.Mode == "" {
-		return "unsupported Kaggle auth mode"
+type RuntimeSetupError struct {
+	Op   string
+	Path string
+	Err  error
+}
+
+func (e *RuntimeSetupError) Error() string {
+	if e == nil {
+		return "prepare Kaggle runtime"
 	}
-	return fmt.Sprintf("unsupported Kaggle auth mode: %s", e.Mode)
+	if e.Path != "" {
+		return fmt.Sprintf("prepare Kaggle runtime: %s %s: %v", e.Op, e.Path, e.Err)
+	}
+	return fmt.Sprintf("prepare Kaggle runtime: %s: %v", e.Op, e.Err)
+}
+
+func (e *RuntimeSetupError) Unwrap() error { return e.Err }
+
+type runtimeSetupDeps struct {
+	mkdirTemp func(string, string) (string, error)
+	writeFile func(string, []byte, os.FileMode) error
+	chmod     func(string, os.FileMode) error
+	removeAll func(string) error
+}
+
+func defaultRuntimeSetupDeps() runtimeSetupDeps {
+	return runtimeSetupDeps{
+		mkdirTemp: os.MkdirTemp,
+		writeFile: os.WriteFile,
+		chmod:     os.Chmod,
+		removeAll: os.RemoveAll,
+	}
 }
 
 type credentialResolverDeps struct {
@@ -151,16 +168,14 @@ func defaultCredentialResolverDeps() credentialResolverDeps {
 	}
 }
 
-// ResolveCredentials discovers Kaggle credentials from environment variables
-// and Kaggle config file locations without exposing secret values.
-func ResolveCredentials(env EnvSource) (Credentials, error) {
-	return resolveCredentialsWithDeps(env, defaultCredentialResolverDeps())
-}
-
-// LoadCredentials preserves the historical helper name while delegating to the
-// multi-source credential resolver.
+// LoadCredentials reads Kaggle credentials from the provided environment source.
 func LoadCredentials(env EnvSource) (Credentials, error) {
 	return ResolveCredentials(env)
+}
+
+// ResolveCredentials discovers Kaggle credentials from the process environment and Kaggle config files.
+func ResolveCredentials(env EnvSource) (Credentials, error) {
+	return resolveCredentialsWithDeps(env, defaultCredentialResolverDeps())
 }
 
 func resolveCredentialsWithDeps(env EnvSource, deps credentialResolverDeps) (Credentials, error) {
@@ -172,8 +187,8 @@ func resolveCredentialsWithDeps(env EnvSource, deps credentialResolverDeps) (Cre
 		token = strings.TrimSpace(token)
 		if token == "" {
 			return Credentials{}, &CredentialValidationError{
-				Source:  CredentialSourceEnvToken,
-				Missing: []string{envKaggleAPIToken},
+				Fields: []string{envKaggleAPIToken},
+				Source: CredentialSourceEnvToken,
 			}
 		}
 		return Credentials{
@@ -185,18 +200,19 @@ func resolveCredentialsWithDeps(env EnvSource, deps credentialResolverDeps) (Cre
 
 	username, hasUsername := env.LookupEnv(envKaggleUsername)
 	key, hasKey := env.LookupEnv(envKaggleKey)
+
 	if hasUsername || hasKey {
-		var missing []string
+		var invalid []string
 		if strings.TrimSpace(username) == "" {
-			missing = append(missing, envKaggleUsername)
+			invalid = append(invalid, envKaggleUsername)
 		}
 		if strings.TrimSpace(key) == "" {
-			missing = append(missing, envKaggleKey)
+			invalid = append(invalid, envKaggleKey)
 		}
-		if len(missing) > 0 {
+		if len(invalid) > 0 {
 			return Credentials{}, &CredentialValidationError{
-				Source:  CredentialSourceEnvLegacy,
-				Missing: missing,
+				Fields: invalid,
+				Source: CredentialSourceEnvLegacy,
 			}
 		}
 		return Credentials{
@@ -213,38 +229,38 @@ func resolveCredentialsWithDeps(env EnvSource, deps credentialResolverDeps) (Cre
 	}
 
 	checkedPaths := make([]string, 0, len(configDirs)*2)
-	for _, configDir := range configDirs {
-		tokenPath := filepath.Join(configDir, accessTokenFilename)
+	for _, dir := range configDirs {
+		tokenPath := filepath.Join(dir, accessTokenFilename)
 		checkedPaths = append(checkedPaths, tokenPath)
 		if exists, err := pathExists(tokenPath, deps.stat); err != nil {
 			return Credentials{}, fmt.Errorf("check Kaggle token file: %w", err)
 		} else if exists {
-			token, err := deps.readFile(tokenPath)
+			content, err := deps.readFile(tokenPath)
 			if err != nil {
 				return Credentials{}, fmt.Errorf("read Kaggle token file: %w", err)
 			}
-			value := strings.TrimSpace(string(token))
-			if value == "" {
+			token := strings.TrimSpace(string(content))
+			if token == "" {
 				return Credentials{}, &CredentialValidationError{
-					Source:  CredentialSourceFileToken,
-					Path:    tokenPath,
-					Missing: []string{accessTokenFilename},
+					Fields: []string{accessTokenFilename},
+					Source: CredentialSourceFileToken,
+					Path:   tokenPath,
 				}
 			}
 			return Credentials{
 				Mode:   AuthModeToken,
 				Source: CredentialSourceFileToken,
 				Path:   tokenPath,
-				Token:  value,
+				Token:  token,
 			}, nil
 		}
 
-		legacyPath := filepath.Join(configDir, kaggleJSONFilename)
-		checkedPaths = append(checkedPaths, legacyPath)
-		if exists, err := pathExists(legacyPath, deps.stat); err != nil {
+		configPath := filepath.Join(dir, kaggleJSONFilename)
+		checkedPaths = append(checkedPaths, configPath)
+		if exists, err := pathExists(configPath, deps.stat); err != nil {
 			return Credentials{}, fmt.Errorf("check Kaggle config file: %w", err)
 		} else if exists {
-			data, err := deps.readFile(legacyPath)
+			content, err := deps.readFile(configPath)
 			if err != nil {
 				return Credentials{}, fmt.Errorf("read Kaggle config file: %w", err)
 			}
@@ -252,34 +268,32 @@ func resolveCredentialsWithDeps(env EnvSource, deps credentialResolverDeps) (Cre
 				Username string `json:"username"`
 				Key      string `json:"key"`
 			}
-			if err := json.Unmarshal(data, &payload); err != nil {
+			if err := json.Unmarshal(content, &payload); err != nil {
 				return Credentials{}, &CredentialValidationError{
-					Source:  CredentialSourceFileLegacy,
-					Path:    legacyPath,
 					Problem: "malformed kaggle.json",
+					Source:  CredentialSourceFileLegacy,
+					Path:    configPath,
 					Err:     err,
 				}
 			}
-
-			var missing []string
+			var invalid []string
 			if strings.TrimSpace(payload.Username) == "" {
-				missing = append(missing, "username")
+				invalid = append(invalid, "username")
 			}
 			if strings.TrimSpace(payload.Key) == "" {
-				missing = append(missing, "key")
+				invalid = append(invalid, "key")
 			}
-			if len(missing) > 0 {
+			if len(invalid) > 0 {
 				return Credentials{}, &CredentialValidationError{
-					Source:  CredentialSourceFileLegacy,
-					Path:    legacyPath,
-					Missing: missing,
+					Fields: invalid,
+					Source: CredentialSourceFileLegacy,
+					Path:   configPath,
 				}
 			}
-
 			return Credentials{
 				Mode:     AuthModeLegacy,
 				Source:   CredentialSourceFileLegacy,
-				Path:     legacyPath,
+				Path:     configPath,
 				Username: payload.Username,
 				Key:      payload.Key,
 			}, nil
@@ -292,13 +306,85 @@ func resolveCredentialsWithDeps(env EnvSource, deps credentialResolverDeps) (Cre
 	}
 }
 
+// PrepareRuntime converts GitHub Actions environment credentials into a Kaggle CLI-ready runtime.
+func PrepareRuntime(env EnvSource) (RuntimeSetup, error) {
+	return prepareRuntimeWithDeps(env, defaultRuntimeSetupDeps())
+}
+
+func prepareRuntimeWithDeps(env EnvSource, deps runtimeSetupDeps) (RuntimeSetup, error) {
+	creds, err := ResolveCredentials(env)
+	if err != nil {
+		return RuntimeSetup{}, err
+	}
+
+	dir, err := deps.mkdirTemp("", "kgh-kaggle-*")
+	if err != nil {
+		return RuntimeSetup{}, &RuntimeSetupError{Op: "create temp dir", Err: err}
+	}
+	cleanup := func() error {
+		if err := deps.removeAll(dir); err != nil {
+			return &RuntimeSetupError{Op: "cleanup", Path: dir, Err: err}
+		}
+		return nil
+	}
+
+	if err := deps.chmod(dir, 0o700); err != nil {
+		_ = cleanup()
+		return RuntimeSetup{}, &RuntimeSetupError{Op: "chmod", Path: dir, Err: err}
+	}
+
+	setup := RuntimeSetup{
+		ConfigDir: dir,
+		AuthMode:  creds.Mode,
+		Source:    creds.Source,
+		Cleanup:   cleanup,
+	}
+
+	switch creds.Mode {
+	case AuthModeToken:
+		tokenPath := filepath.Join(dir, accessTokenFilename)
+		if err := writeSecretFile(tokenPath, []byte(creds.Token), deps); err != nil {
+			_ = cleanup()
+			return RuntimeSetup{}, err
+		}
+		setup.Env = []string{
+			envKaggleConfigDir + "=" + dir,
+		}
+	case AuthModeLegacy:
+		payload, err := json.Marshal(struct {
+			Username string `json:"username"`
+			Key      string `json:"key"`
+		}{
+			Username: creds.Username,
+			Key:      creds.Key,
+		})
+		if err != nil {
+			_ = cleanup()
+			return RuntimeSetup{}, &RuntimeSetupError{Op: "marshal", Path: filepath.Join(dir, kaggleJSONFilename), Err: err}
+		}
+		configPath := filepath.Join(dir, kaggleJSONFilename)
+		if err := writeSecretFile(configPath, payload, deps); err != nil {
+			_ = cleanup()
+			return RuntimeSetup{}, err
+		}
+		setup.Env = []string{
+			envKaggleConfigDir + "=" + dir,
+		}
+	default:
+		_ = cleanup()
+		return RuntimeSetup{}, &CredentialValidationError{Problem: "unsupported auth mode"}
+	}
+
+	return setup, nil
+}
+
 func resolveConfigDirs(env EnvSource, deps credentialResolverDeps) ([]string, error) {
 	if value, ok := env.LookupEnv(envKaggleConfigDir); ok {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			return nil, &CredentialValidationError{
-				Source:  CredentialSourceFileLegacy,
-				Missing: []string{envKaggleConfigDir},
+				Fields: []string{envKaggleConfigDir},
+				Source: CredentialSourceFileLegacy,
 			}
 		}
 		return []string{value}, nil
@@ -323,6 +409,16 @@ func resolveConfigDirs(env EnvSource, deps credentialResolverDeps) ([]string, er
 		return []string{defaultDir}, nil
 	}
 	return []string{defaultDir, xdgDir}, nil
+}
+
+func writeSecretFile(path string, content []byte, deps runtimeSetupDeps) error {
+	if err := deps.writeFile(path, content, 0o600); err != nil {
+		return &RuntimeSetupError{Op: "write", Path: path, Err: err}
+	}
+	if err := deps.chmod(path, 0o600); err != nil {
+		return &RuntimeSetupError{Op: "chmod", Path: path, Err: err}
+	}
+	return nil
 }
 
 func pathExists(path string, stat func(string) (os.FileInfo, error)) (bool, error) {
