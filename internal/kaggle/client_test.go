@@ -3,6 +3,8 @@ package kaggle
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -246,33 +248,79 @@ func TestClientRunReturnsExecutableLookupError(t *testing.T) {
 	}
 }
 
-func TestClientRunRejectsTokenAuthUntilSupported(t *testing.T) {
+func TestClientRunSupportsTokenAuth(t *testing.T) {
 	t.Parallel()
 
+	runner := &clientFakeRunner{
+		t: t,
+		runFn: func(ctx context.Context, cmd command) (Result, error) {
+			if !reflect.DeepEqual(cmd.Args, []string{"/usr/local/bin/kaggle", "kernels", "status"}) {
+				t.Fatalf("unexpected args %#v", cmd.Args)
+			}
+			wantEnv := []string{
+				"PATH=/usr/bin",
+				"KAGGLE_API_TOKEN=secret-token",
+			}
+			if !reflect.DeepEqual(cmd.Env, wantEnv) {
+				t.Fatalf("unexpected env %#v", cmd.Env)
+			}
+			if _, ok := ctx.Deadline(); !ok {
+				t.Fatal("expected context deadline to be set")
+			}
+			return Result{ExitCode: 0}, nil
+		},
+	}
+
 	client := NewClientWithDeps(
-		&clientFakeRunner{t: t},
+		runner,
 		staticEnvSource{
 			envKaggleAPIToken: "secret-token",
 		},
-		func(string) (string, error) {
-			t.Fatal("did not expect executable lookup")
-			return "", nil
-		},
-		func() []string { return nil },
+		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
+		func() []string { return []string{"PATH=/usr/bin"} },
 		time.Second,
 	)
 
-	_, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{})
-	if err == nil {
-		t.Fatal("expected an error")
+	if _, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{}); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestClientRunSetsConfigDirForFileCredentials(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, accessTokenFilename), []byte("token-from-file"), 0o644); err != nil {
+		t.Fatalf("write token file: %v", err)
 	}
 
-	var unsupportedErr *UnsupportedAuthModeError
-	if !errors.As(err, &unsupportedErr) {
-		t.Fatalf("expected UnsupportedAuthModeError, got %T", err)
+	runner := &clientFakeRunner{
+		t: t,
+		runFn: func(ctx context.Context, cmd command) (Result, error) {
+			wantEnv := []string{
+				"PATH=/usr/bin",
+				"KAGGLE_API_TOKEN=token-from-file",
+				"KAGGLE_CONFIG_DIR=" + dir,
+			}
+			if !reflect.DeepEqual(cmd.Env, wantEnv) {
+				t.Fatalf("unexpected env %#v", cmd.Env)
+			}
+			return Result{ExitCode: 0}, nil
+		},
 	}
-	if unsupportedErr.Mode != AuthModeToken {
-		t.Fatalf("unexpected auth mode %q", unsupportedErr.Mode)
+
+	client := NewClientWithDeps(
+		runner,
+		staticEnvSource{
+			envKaggleConfigDir: dir,
+		},
+		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
+		func() []string { return []string{"PATH=/usr/bin"} },
+		time.Second,
+	)
+
+	if _, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{}); err != nil {
+		t.Fatalf("expected no error, got %v", err)
 	}
 }
 
