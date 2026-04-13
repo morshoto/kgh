@@ -5,6 +5,10 @@ name: Go CI
         branches:
             - main
     pull_request:
+        paths:
+            - '**.go'
+            - '**.mod'
+            - '**.sum'
 
 permissions:
     contents: read
