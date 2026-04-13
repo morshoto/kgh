@@ -1,0 +1,18 @@
+version: 2
+
+project_name: kgh
+
+builds:
+  - id: kgh
+    main: ./cmd/kgh
+    binary: kgh
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: kgh
+
+checksum:
+  name_template: checksums.txt
