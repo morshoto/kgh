@@ -173,6 +173,43 @@ func TestResolveCredentialsFallsBackToXDGOnLinux(t *testing.T) {
 	}
 }
 
+func TestResolveCredentialsFallsBackToXDGEvenWhenDotKaggleDirExists(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".kaggle"), 0o755); err != nil {
+		t.Fatalf("mkdir empty .kaggle dir: %v", err)
+	}
+
+	xdg := filepath.Join(home, "xdg")
+	configDir := filepath.Join(xdg, "kaggle")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir xdg config dir: %v", err)
+	}
+	path := filepath.Join(configDir, accessTokenFilename)
+	if err := os.WriteFile(path, []byte("token-from-xdg"), 0o644); err != nil {
+		t.Fatalf("write access_token: %v", err)
+	}
+
+	creds, err := resolveCredentialsWithDeps(staticEnvSource{
+		envXDGConfigHome: xdg,
+	}, credentialResolverDeps{
+		readFile: os.ReadFile,
+		stat:     os.Stat,
+		homeDir:  func() (string, error) { return home, nil },
+		goos:     "linux",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if creds.Path != path {
+		t.Fatalf("expected XDG token path %q, got %q", path, creds.Path)
+	}
+	if creds.Mode != AuthModeToken || creds.Source != CredentialSourceFileToken {
+		t.Fatalf("unexpected credentials %#v", creds.Diagnostics())
+	}
+}
+
 func TestResolveCredentialsPartialEnvFailsWithoutFallingThrough(t *testing.T) {
 	t.Parallel()
 

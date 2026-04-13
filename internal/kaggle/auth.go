@@ -207,121 +207,122 @@ func resolveCredentialsWithDeps(env EnvSource, deps credentialResolverDeps) (Cre
 		}, nil
 	}
 
-	configDir, err := resolveConfigDir(env, deps)
+	configDirs, err := resolveConfigDirs(env, deps)
 	if err != nil {
 		return Credentials{}, err
 	}
 
-	tokenPath := filepath.Join(configDir, accessTokenFilename)
-	if exists, err := pathExists(tokenPath, deps.stat); err != nil {
-		return Credentials{}, fmt.Errorf("check Kaggle token file: %w", err)
-	} else if exists {
-		token, err := deps.readFile(tokenPath)
-		if err != nil {
-			return Credentials{}, fmt.Errorf("read Kaggle token file: %w", err)
-		}
-		value := strings.TrimSpace(string(token))
-		if value == "" {
-			return Credentials{}, &CredentialValidationError{
-				Source:  CredentialSourceFileToken,
-				Path:    tokenPath,
-				Missing: []string{accessTokenFilename},
+	checkedPaths := make([]string, 0, len(configDirs)*2)
+	for _, configDir := range configDirs {
+		tokenPath := filepath.Join(configDir, accessTokenFilename)
+		checkedPaths = append(checkedPaths, tokenPath)
+		if exists, err := pathExists(tokenPath, deps.stat); err != nil {
+			return Credentials{}, fmt.Errorf("check Kaggle token file: %w", err)
+		} else if exists {
+			token, err := deps.readFile(tokenPath)
+			if err != nil {
+				return Credentials{}, fmt.Errorf("read Kaggle token file: %w", err)
 			}
-		}
-		return Credentials{
-			Mode:   AuthModeToken,
-			Source: CredentialSourceFileToken,
-			Path:   tokenPath,
-			Token:  value,
-		}, nil
-	}
-
-	legacyPath := filepath.Join(configDir, kaggleJSONFilename)
-	if exists, err := pathExists(legacyPath, deps.stat); err != nil {
-		return Credentials{}, fmt.Errorf("check Kaggle config file: %w", err)
-	} else if exists {
-		data, err := deps.readFile(legacyPath)
-		if err != nil {
-			return Credentials{}, fmt.Errorf("read Kaggle config file: %w", err)
-		}
-		var payload struct {
-			Username string `json:"username"`
-			Key      string `json:"key"`
-		}
-		if err := json.Unmarshal(data, &payload); err != nil {
-			return Credentials{}, &CredentialValidationError{
-				Source:  CredentialSourceFileLegacy,
-				Path:    legacyPath,
-				Problem: "malformed kaggle.json",
-				Err:     err,
+			value := strings.TrimSpace(string(token))
+			if value == "" {
+				return Credentials{}, &CredentialValidationError{
+					Source:  CredentialSourceFileToken,
+					Path:    tokenPath,
+					Missing: []string{accessTokenFilename},
+				}
 			}
+			return Credentials{
+				Mode:   AuthModeToken,
+				Source: CredentialSourceFileToken,
+				Path:   tokenPath,
+				Token:  value,
+			}, nil
 		}
 
-		var missing []string
-		if strings.TrimSpace(payload.Username) == "" {
-			missing = append(missing, "username")
-		}
-		if strings.TrimSpace(payload.Key) == "" {
-			missing = append(missing, "key")
-		}
-		if len(missing) > 0 {
-			return Credentials{}, &CredentialValidationError{
-				Source:  CredentialSourceFileLegacy,
-				Path:    legacyPath,
-				Missing: missing,
+		legacyPath := filepath.Join(configDir, kaggleJSONFilename)
+		checkedPaths = append(checkedPaths, legacyPath)
+		if exists, err := pathExists(legacyPath, deps.stat); err != nil {
+			return Credentials{}, fmt.Errorf("check Kaggle config file: %w", err)
+		} else if exists {
+			data, err := deps.readFile(legacyPath)
+			if err != nil {
+				return Credentials{}, fmt.Errorf("read Kaggle config file: %w", err)
 			}
-		}
+			var payload struct {
+				Username string `json:"username"`
+				Key      string `json:"key"`
+			}
+			if err := json.Unmarshal(data, &payload); err != nil {
+				return Credentials{}, &CredentialValidationError{
+					Source:  CredentialSourceFileLegacy,
+					Path:    legacyPath,
+					Problem: "malformed kaggle.json",
+					Err:     err,
+				}
+			}
 
-		return Credentials{
-			Mode:     AuthModeLegacy,
-			Source:   CredentialSourceFileLegacy,
-			Path:     legacyPath,
-			Username: payload.Username,
-			Key:      payload.Key,
-		}, nil
+			var missing []string
+			if strings.TrimSpace(payload.Username) == "" {
+				missing = append(missing, "username")
+			}
+			if strings.TrimSpace(payload.Key) == "" {
+				missing = append(missing, "key")
+			}
+			if len(missing) > 0 {
+				return Credentials{}, &CredentialValidationError{
+					Source:  CredentialSourceFileLegacy,
+					Path:    legacyPath,
+					Missing: missing,
+				}
+			}
+
+			return Credentials{
+				Mode:     AuthModeLegacy,
+				Source:   CredentialSourceFileLegacy,
+				Path:     legacyPath,
+				Username: payload.Username,
+				Key:      payload.Key,
+			}, nil
+		}
 	}
 
 	return Credentials{}, &MissingCredentialsError{
 		Missing: []string{envKaggleAPIToken, envKaggleUsername, envKaggleKey},
-		Paths:   []string{tokenPath, legacyPath},
+		Paths:   checkedPaths,
 	}
 }
 
-func resolveConfigDir(env EnvSource, deps credentialResolverDeps) (string, error) {
+func resolveConfigDirs(env EnvSource, deps credentialResolverDeps) ([]string, error) {
 	if value, ok := env.LookupEnv(envKaggleConfigDir); ok {
 		value = strings.TrimSpace(value)
 		if value == "" {
-			return "", &CredentialValidationError{
+			return nil, &CredentialValidationError{
 				Source:  CredentialSourceFileLegacy,
 				Missing: []string{envKaggleConfigDir},
 			}
 		}
-		return value, nil
+		return []string{value}, nil
 	}
 
 	home, err := deps.homeDir()
 	if err != nil {
-		return "", fmt.Errorf("resolve home directory: %w", err)
+		return nil, fmt.Errorf("resolve home directory: %w", err)
 	}
 
 	defaultDir := filepath.Join(home, ".kaggle")
 	if deps.goos != "linux" {
-		return defaultDir, nil
-	}
-
-	exists, err := pathExists(defaultDir, deps.stat)
-	if err != nil {
-		return "", fmt.Errorf("check Kaggle config directory: %w", err)
-	}
-	if exists {
-		return defaultDir, nil
+		return []string{defaultDir}, nil
 	}
 
 	xdgRoot, ok := env.LookupEnv(envXDGConfigHome)
 	if !ok || strings.TrimSpace(xdgRoot) == "" {
 		xdgRoot = filepath.Join(home, ".config")
 	}
-	return filepath.Join(xdgRoot, "kaggle"), nil
+	xdgDir := filepath.Join(xdgRoot, "kaggle")
+	if xdgDir == defaultDir {
+		return []string{defaultDir}, nil
+	}
+	return []string{defaultDir, xdgDir}, nil
 }
 
 func pathExists(path string, stat func(string) (os.FileInfo, error)) (bool, error) {
