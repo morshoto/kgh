@@ -149,7 +149,12 @@ func TestResolveCredentialsFallsBackToXDGOnLinux(t *testing.T) {
 func TestResolveCredentialsMissing(t *testing.T) {
 	t.Parallel()
 
-	_, err := ResolveCredentials(staticEnvSource{})
+	_, err := resolveCredentialsWithDeps(staticEnvSource{}, credentialResolverDeps{
+		readFile: os.ReadFile,
+		stat:     os.Stat,
+		homeDir:  func() (string, error) { return t.TempDir(), nil },
+		goos:     "darwin",
+	})
 	if err == nil {
 		t.Fatal("expected an error")
 	}
