@@ -113,7 +113,7 @@ func TestMergeEnvDoesNotMutateBase(t *testing.T) {
 	t.Parallel()
 
 	base := []string{"PATH=/usr/bin", "HOME=/tmp/home"}
-	got := mergeEnv(base, []string{"HOME=/override/home"})
+	got := MergeEnv(base, []string{"HOME=/override/home"})
 	if !reflect.DeepEqual(base, []string{"PATH=/usr/bin", "HOME=/tmp/home"}) {
 		t.Fatalf("base environment was mutated: %#v", base)
 	}

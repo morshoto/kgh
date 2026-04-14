@@ -17,6 +17,7 @@ type Client struct {
 	runner         Runner
 	env            EnvSource
 	lookPath       LookPathFunc
+	baseEnv        func() []string
 	defaultTimeout time.Duration
 }
 
@@ -71,17 +72,17 @@ func NewClient() *Client {
 
 // NewClientWithDeps constructs a Kaggle CLI adapter with injected dependencies for tests.
 func NewClientWithDeps(runner Runner, env EnvSource, lookPath LookPathFunc, baseEnv func() []string, timeout time.Duration) *Client {
+	if baseEnv == nil {
+		baseEnv = currentEnv
+	}
 	if runner == nil {
-		runner = execx.NewRunnerWithBaseEnv(baseEnv)
+		runner = execx.NewRunnerWithBaseEnv(func() []string { return nil })
 	}
 	if env == nil {
 		env = osEnvSource{}
 	}
 	if lookPath == nil {
 		lookPath = exec.LookPath
-	}
-	if baseEnv == nil {
-		baseEnv = currentEnv
 	}
 	if timeout <= 0 {
 		timeout = defaultTimeout
@@ -91,6 +92,7 @@ func NewClientWithDeps(runner Runner, env EnvSource, lookPath LookPathFunc, base
 		runner:         runner,
 		env:            env,
 		lookPath:       lookPath,
+		baseEnv:        baseEnv,
 		defaultTimeout: timeout,
 	}
 }
@@ -128,7 +130,7 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 
 	result, err := c.runner.Run(ctx, command, RunOptions{
 		Dir:     opts.Dir,
-		Env:     append(runtimeSetup.Env, opts.Env...),
+		Env:     execx.MergeEnv(c.baseEnv(), append(runtimeSetup.Env, opts.Env...)),
 		Timeout: timeout,
 	})
 	if err == nil {

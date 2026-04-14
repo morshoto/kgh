@@ -104,7 +104,7 @@ func (r runner) Run(ctx context.Context, cmd Command, opts Options) (Result, err
 
 	execCmd := exec.CommandContext(runCtx, cmd.Path, cmd.Args...)
 	execCmd.Dir = opts.Dir
-	execCmd.Env = mergeEnv(r.baseEnv(), opts.Env)
+	execCmd.Env = MergeEnv(r.baseEnv(), opts.Env)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -148,7 +148,8 @@ func (r runner) Run(ctx context.Context, cmd Command, opts Options) (Result, err
 	return result, err
 }
 
-func mergeEnv(base []string, extra []string) []string {
+// MergeEnv overlays extra environment entries onto base without mutating base.
+func MergeEnv(base []string, extra []string) []string {
 	merged := slices.Clone(base)
 	if len(extra) == 0 {
 		return merged

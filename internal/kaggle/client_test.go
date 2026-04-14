@@ -30,6 +30,7 @@ func TestClientRunSuccess(t *testing.T) {
 			if opts.Timeout != 30*time.Second {
 				t.Fatalf("unexpected timeout %s", opts.Timeout)
 			}
+			assertEnvContains(t, opts.Env, "PATH", "/usr/bin")
 			assertEnvContains(t, opts.Env, "HOME", "/tmp/home")
 			assertEnvMissing(t, opts.Env, envKaggleAPIToken)
 			assertEnvMissing(t, opts.Env, envKaggleUsername)
@@ -104,6 +105,34 @@ func TestClientRunUsesDefaultTimeout(t *testing.T) {
 	)
 
 	if _, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{}); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestClientRunAppliesBaseEnvForCustomRunner(t *testing.T) {
+	t.Parallel()
+
+	client := NewClientWithDeps(
+		&clientFakeRunner{
+			t: t,
+			runFn: func(_ context.Context, _ command, opts RunOptions) (Result, error) {
+				assertEnvContains(t, opts.Env, "PATH", "/usr/bin")
+				assertEnvContains(t, opts.Env, "HOME", "/override/home")
+				return Result{}, nil
+			},
+		},
+		staticEnvSource{
+			envKaggleUsername: "alice",
+			envKaggleKey:      "secret-key",
+		},
+		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
+		func() []string { return []string{"PATH=/usr/bin", "HOME=/base/home"} },
+		time.Second,
+	)
+
+	if _, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{
+		Env: []string{"HOME=/override/home"},
+	}); err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 }
