@@ -1,6 +1,6 @@
 name: '🎨 Design/Interface'
 description: 'Suggest a design proposal for the project. Please provide as much detail as possible to help us understand and evaluate your suggestion.'
-title: '🎨 '
+title: '[Design] '
 labels:
     - 'Type: Design'
 body:
@@ -22,34 +22,9 @@ body:
           required: false
 
     - type: textarea
-      id: constraints
-      attributes:
-          label: 'Constraints/Non-Goals'
-          description: 'If applicable, please specify any constraints or non-goals'
-      validations:
-          required: false
-
-    - type: textarea
-      id: references
-      attributes:
-          label: 'Reference Materials'
-          description: 'Reference materials or links that may be helpful'
-      validations:
-          required: false
-
-    - type: textarea
-      id: links
+      id: links and screenshots
       attributes:
           label: 'Related Links'
           description: 'Links to related issues, PRs, or documentation'
-      validations:
-          required: false
-
-    - type: textarea
-      id: screenshots
-      attributes:
-          label: 'Screenshots'
-          description: 'Attach screenshots or .gif files to help illustrate the design'
-          placeholder: 'Drag and drop images here'
       validations:
           required: false

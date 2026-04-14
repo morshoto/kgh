@@ -1,6 +1,6 @@
 name: '♻️ Improvement / Refactor'
 description: 'Suggest an improvement or refactor for the project. Please provide as much detail as possible to help us understand and evaluate your suggestion.'
-title: '♻️ '
+title: '[Improvement] '
 labels:
     - 'Type: Improvement'
 body:
@@ -14,7 +14,7 @@ body:
           required: true
 
     - type: textarea
-      id: links
+      id: links and screenshots
       attributes:
           label: 'Related Links'
           description: 'Links to related issues, PRs, or documentation'

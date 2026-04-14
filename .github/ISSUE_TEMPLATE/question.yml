@@ -1,6 +1,6 @@
 name: '❓ Question'
 description: 'Ask a question or request clarification about the project. Please provide as much detail as possible to help us understand your question.'
-title: '❓ '
+title: '[Question] '
 labels:
     - 'Feedback: Question'
 body:
@@ -14,7 +14,7 @@ body:
           required: true
 
     - type: textarea
-      id: links
+      id: links and screenshots
       attributes:
           label: 'Related Links'
           description: 'Links to related issues, PRs, or documentation'
