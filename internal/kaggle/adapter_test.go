@@ -95,7 +95,7 @@ func TestCLIAdapterKernelStatus(t *testing.T) {
 				t.Fatalf("unexpected args %#v", args)
 			}
 			assertZeroRunOptions(t, opts)
-			return Result{Stdout: "status: complete\nmessage: finished\n"}, nil
+			return Result{Stdout: "status: complete\nmessage: finished\nqueued: false\n"}, nil
 		},
 	}
 
@@ -110,6 +110,15 @@ func TestCLIAdapterKernelStatus(t *testing.T) {
 	}
 	if resp.Status != "complete" || resp.Message != "finished" {
 		t.Fatalf("unexpected status response %+v", resp)
+	}
+	if resp.Raw.ExitCode != 0 {
+		t.Fatalf("unexpected raw exit code %d", resp.Raw.ExitCode)
+	}
+	if resp.Raw.Fields["status"] != "complete" || resp.Raw.Fields["queued"] != "false" {
+		t.Fatalf("unexpected raw fields %+v", resp.Raw.Fields)
+	}
+	if resp.Raw.Stdout != "status: complete\nmessage: finished\nqueued: false\n" {
+		t.Fatalf("unexpected raw stdout %q", resp.Raw.Stdout)
 	}
 }
 
