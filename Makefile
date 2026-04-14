@@ -4,7 +4,7 @@ test:
 	go test ./...
 
 build:
-	go build ./cmd/kh
+	go build ./cmd/kgh
 
 fmt:
 	gofmt -w $(shell find . -name '*.go' -not -path './vendor/*')
