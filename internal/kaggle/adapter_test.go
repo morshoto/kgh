@@ -122,6 +122,52 @@ func TestCLIAdapterKernelStatus(t *testing.T) {
 	}
 }
 
+func TestParseKernelStatusResultPreservesRawFields(t *testing.T) {
+	t.Parallel()
+
+	result := Result{
+		Stdout:   "Kernel status: running\nmessage: queued for execution\nattempt: 2\n",
+		Stderr:   "warning: slow queue\n",
+		ExitCode: 0,
+	}
+
+	resp, err := parseKernelStatusResult("alice/exp142", result)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.Status != "running" {
+		t.Fatalf("unexpected status %q", resp.Status)
+	}
+	if resp.Message != "queued for execution" {
+		t.Fatalf("unexpected message %q", resp.Message)
+	}
+	if resp.Raw.Fields["kernelstatus"] != "running" {
+		t.Fatalf("unexpected raw fields %+v", resp.Raw.Fields)
+	}
+	if resp.Raw.Fields["attempt"] != "2" {
+		t.Fatalf("unexpected raw fields %+v", resp.Raw.Fields)
+	}
+	if resp.Raw.Stderr != "warning: slow queue\n" {
+		t.Fatalf("unexpected raw stderr %q", resp.Raw.Stderr)
+	}
+}
+
+func TestCloneStringMapReturnsIndependentCopy(t *testing.T) {
+	t.Parallel()
+
+	source := map[string]string{"status": "running"}
+	got := cloneStringMap(source)
+
+	got["status"] = "complete"
+
+	if source["status"] != "running" {
+		t.Fatalf("expected source map to remain unchanged, got %+v", source)
+	}
+	if got["status"] != "complete" {
+		t.Fatalf("unexpected cloned map %+v", got)
+	}
+}
+
 func TestCLIAdapterDownloadKernelOutput(t *testing.T) {
 	t.Parallel()
 
