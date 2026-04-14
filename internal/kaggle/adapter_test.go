@@ -95,7 +95,7 @@ func TestCLIAdapterKernelStatus(t *testing.T) {
 				t.Fatalf("unexpected args %#v", args)
 			}
 			assertZeroRunOptions(t, opts)
-			return Result{Stdout: "status: complete\nmessage: finished\n"}, nil
+			return Result{Stdout: "status: complete\nmessage: finished\nqueued: false\n"}, nil
 		},
 	}
 
@@ -110,6 +110,61 @@ func TestCLIAdapterKernelStatus(t *testing.T) {
 	}
 	if resp.Status != "complete" || resp.Message != "finished" {
 		t.Fatalf("unexpected status response %+v", resp)
+	}
+	if resp.Raw.ExitCode != 0 {
+		t.Fatalf("unexpected raw exit code %d", resp.Raw.ExitCode)
+	}
+	if resp.Raw.Fields["status"] != "complete" || resp.Raw.Fields["queued"] != "false" {
+		t.Fatalf("unexpected raw fields %+v", resp.Raw.Fields)
+	}
+	if resp.Raw.Stdout != "status: complete\nmessage: finished\nqueued: false\n" {
+		t.Fatalf("unexpected raw stdout %q", resp.Raw.Stdout)
+	}
+}
+
+func TestParseKernelStatusResultPreservesRawFields(t *testing.T) {
+	t.Parallel()
+
+	result := Result{
+		Stdout:   "Kernel status: running\nmessage: queued for execution\nattempt: 2\n",
+		Stderr:   "warning: slow queue\n",
+		ExitCode: 0,
+	}
+
+	resp, err := parseKernelStatusResult("alice/exp142", result)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.Status != "running" {
+		t.Fatalf("unexpected status %q", resp.Status)
+	}
+	if resp.Message != "queued for execution" {
+		t.Fatalf("unexpected message %q", resp.Message)
+	}
+	if resp.Raw.Fields["kernelstatus"] != "running" {
+		t.Fatalf("unexpected raw fields %+v", resp.Raw.Fields)
+	}
+	if resp.Raw.Fields["attempt"] != "2" {
+		t.Fatalf("unexpected raw fields %+v", resp.Raw.Fields)
+	}
+	if resp.Raw.Stderr != "warning: slow queue\n" {
+		t.Fatalf("unexpected raw stderr %q", resp.Raw.Stderr)
+	}
+}
+
+func TestCloneStringMapReturnsIndependentCopy(t *testing.T) {
+	t.Parallel()
+
+	source := map[string]string{"status": "running"}
+	got := cloneStringMap(source)
+
+	got["status"] = "complete"
+
+	if source["status"] != "running" {
+		t.Fatalf("expected source map to remain unchanged, got %+v", source)
+	}
+	if got["status"] != "complete" {
+		t.Fatalf("unexpected cloned map %+v", got)
 	}
 }
 

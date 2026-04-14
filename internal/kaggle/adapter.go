@@ -42,6 +42,16 @@ type KernelStatusResponse struct {
 	KernelRef string
 	Status    string
 	Message   string
+	Raw       KernelStatusRawStatus
+}
+
+// KernelStatusRawStatus preserves the parsed CLI output alongside the normalized
+// convenience fields exposed by KernelStatusResponse.
+type KernelStatusRawStatus struct {
+	Fields   map[string]string
+	Stdout   string
+	Stderr   string
+	ExitCode int
 }
 
 type DownloadKernelOutputRequest struct {
@@ -290,6 +300,12 @@ func parseKernelStatusResult(kernelRef string, result Result) (KernelStatusRespo
 		KernelRef: kernelRef,
 		Status:    strings.TrimSpace(status),
 		Message:   strings.TrimSpace(message),
+		Raw: KernelStatusRawStatus{
+			Fields:   cloneStringMap(fields),
+			Stdout:   result.Stdout,
+			Stderr:   result.Stderr,
+			ExitCode: result.ExitCode,
+		},
 	}, nil
 }
 
@@ -472,6 +488,18 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return map[string]string{}
+	}
+
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
 }
 
 func extractKernelRefFromPushResult(result Result) (string, error) {
