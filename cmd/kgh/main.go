@@ -12,6 +12,8 @@ func main() {
 }
 
 func run(args []string) int {
+	args = stripCommandName(args)
+
 	if len(args) == 0 {
 		printUsage()
 		return 0
@@ -31,17 +33,30 @@ func run(args []string) int {
 	}
 }
 
+func stripCommandName(args []string) []string {
+	if len(args) == 0 {
+		return args
+	}
+
+	switch args[0] {
+	case "kgh", "kh":
+		return args[1:]
+	default:
+		return args
+	}
+}
+
 func printUsage() {
-	fmt.Print(`kh is a GitHub-native CLI for Kaggle workflows.
+	fmt.Print(`kgh is a GitHub-native CLI for Kaggle workflows.
 
 Usage:
-  kh <command>
+  kgh <command>
 
 Available Commands:
-  version   Print the current kh version
+  version   Print the current kgh version
   help      Show this help message
 
 Examples:
-  kh version
+  kgh version
 `)
 }
