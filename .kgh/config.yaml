@@ -1,0 +1,9 @@
+targets:
+  issue7-e2e:
+    notebook: notebooks/issue7-e2e.ipynb
+    kernel_id: bloodymonday/issue7-e2e
+    competition: playground-series-s6e2
+    resources:
+      gpu: false
+      internet: false
+      private: false
