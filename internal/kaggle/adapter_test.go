@@ -159,6 +159,49 @@ func TestCLIAdapterPollKernelStatus(t *testing.T) {
 	}
 }
 
+func TestCLIAdapterPollKernelStatusPropagatesTerminalError(t *testing.T) {
+	t.Parallel()
+
+	clock := &pollerClock{now: time.Unix(0, 0)}
+	fake := &pollerFakeStatusClient{
+		t: t,
+		responses: []KernelStatusResponse{
+			{KernelRef: "alice/exp142", Status: "running", Message: "queued"},
+			{KernelRef: "alice/exp142", Status: "cancelled", Message: "user cancelled"},
+		},
+	}
+	adapter := &CLIAdapter{
+		client: &adapterFakeClient{t: t, runFn: func(context.Context, []string, RunOptions) (Result, error) {
+			t.Fatal("PollKernelStatus should not invoke Run directly")
+			return Result{}, nil
+		}},
+		newPoller: func(KernelStatusQuerier) *KernelPoller {
+			return NewKernelPollerWithDeps(fake, clock.Now, clock.Sleep)
+		},
+	}
+
+	result, err := adapter.PollKernelStatus(context.Background(), KernelPollRequest{
+		KernelRef: "alice/exp142",
+		Interval:  time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	var terminalErr *KernelPollTerminalError
+	if !errors.As(err, &terminalErr) {
+		t.Fatalf("expected KernelPollTerminalError, got %T", err)
+	}
+	if terminalErr.Terminal != KernelPollTerminalStateCancelled {
+		t.Fatalf("unexpected terminal state %q", terminalErr.Terminal)
+	}
+	if result.Terminal != KernelPollTerminalStateCancelled {
+		t.Fatalf("unexpected result terminal state %q", result.Terminal)
+	}
+	if result.Status != "cancelled" || result.Message != "user cancelled" {
+		t.Fatalf("unexpected poll result %+v", result)
+	}
+}
+
 func TestParseKernelStatusResultPreservesRawFields(t *testing.T) {
 	t.Parallel()
 
