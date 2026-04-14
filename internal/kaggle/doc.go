@@ -4,6 +4,7 @@
 // Client is a lower-level Kaggle CLI executor that concrete adapters can build on.
 //
 // The package remains intentionally thin. It resolves Kaggle credentials,
-// delegates external command execution to internal/execx, and returns typed
-// errors that higher layers can surface cleanly.
+// stages local kernel bundles, delegates external command execution to
+// internal/execx, and returns typed errors that higher layers can surface
+// cleanly.
 package kaggle
