@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStubAdapterImplementsAdapter(t *testing.T) {
@@ -119,6 +120,42 @@ func TestCLIAdapterKernelStatus(t *testing.T) {
 	}
 	if resp.Raw.Stdout != "status: complete\nmessage: finished\nqueued: false\n" {
 		t.Fatalf("unexpected raw stdout %q", resp.Raw.Stdout)
+	}
+}
+
+func TestCLIAdapterPollKernelStatus(t *testing.T) {
+	t.Parallel()
+
+	clock := &pollerClock{now: time.Unix(0, 0)}
+	fake := &pollerFakeStatusClient{
+		t: t,
+		responses: []KernelStatusResponse{
+			{KernelRef: "alice/exp142", Status: "running", Message: "queued"},
+			{KernelRef: "alice/exp142", Status: "complete", Message: "finished"},
+		},
+	}
+	adapter := &CLIAdapter{
+		client: &adapterFakeClient{t: t, runFn: func(context.Context, []string, RunOptions) (Result, error) {
+			t.Fatal("PollKernelStatus should not invoke Run directly")
+			return Result{}, nil
+		}},
+		newPoller: func(KernelStatusQuerier) *KernelPoller {
+			return NewKernelPollerWithDeps(fake, clock.Now, clock.Sleep)
+		},
+	}
+
+	result, err := adapter.PollKernelStatus(context.Background(), KernelPollRequest{
+		KernelRef: "alice/exp142",
+		Interval:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.Status != "complete" || result.Message != "finished" {
+		t.Fatalf("unexpected poll result %+v", result)
+	}
+	if result.Attempts != 2 {
+		t.Fatalf("unexpected attempts %d", result.Attempts)
 	}
 }
 
@@ -281,6 +318,17 @@ func TestCLIAdapterForwardsDebugFlag(t *testing.T) {
 			want: []string{"kernels", "status", "-p", "alice/exp142"},
 		},
 		{
+			name: "poll kernel status",
+			run: func(adapter *CLIAdapter) error {
+				_, err := adapter.PollKernelStatus(context.Background(), KernelPollRequest{
+					KernelRef: "alice/exp142",
+					Debug:     true,
+				})
+				return err
+			},
+			want: []string{"kernels", "status", "-p", "alice/exp142"},
+		},
+		{
 			name: "download kernel output",
 			run: func(adapter *CLIAdapter) error {
 				_, err := adapter.DownloadKernelOutput(context.Background(), DownloadKernelOutputRequest{
@@ -333,6 +381,8 @@ func TestCLIAdapterForwardsDebugFlag(t *testing.T) {
 					switch tt.name {
 					case "kernel status":
 						return Result{Stdout: "status: complete\nmessage: finished\n"}, nil
+					case "poll kernel status":
+						return Result{Stdout: "status: complete\nmessage: finished\n"}, nil
 					case "push kernel":
 						return Result{Stdout: "Kernel URL: https://www.kaggle.com/code/alice/exp142\nKernel pushed successfully\n"}, nil
 					case "list competition submissions":
@@ -372,6 +422,19 @@ func TestCLIAdapterNormalizesOperationFailures(t *testing.T) {
 			name: "kernel status invalid credentials",
 			run: func(adapter *CLIAdapter) error {
 				_, err := adapter.KernelStatus(context.Background(), KernelStatusRequest{KernelRef: "alice/exp142"})
+				return err
+			},
+			runErr: &CommandError{
+				ExitCode: 1,
+				Stderr:   "401 Unauthorized: invalid credentials",
+				Err:      errors.New("exit status 1"),
+			},
+			wantCategory: ErrorCategoryInvalidCredentials,
+		},
+		{
+			name: "poll kernel status invalid credentials",
+			run: func(adapter *CLIAdapter) error {
+				_, err := adapter.PollKernelStatus(context.Background(), KernelPollRequest{KernelRef: "alice/exp142"})
 				return err
 			},
 			runErr: &CommandError{
@@ -920,6 +983,13 @@ func TestStubAdapterReturnsNotImplemented(t *testing.T) {
 			},
 		},
 		{
+			name: "poll kernel status",
+			run: func() error {
+				_, err := adapter.PollKernelStatus(ctx, KernelPollRequest{})
+				return err
+			},
+		},
+		{
 			name: "download output",
 			run: func() error {
 				_, err := adapter.DownloadKernelOutput(ctx, DownloadKernelOutputRequest{})
@@ -999,4 +1069,19 @@ func assertDebugRunOptions(t *testing.T, opts RunOptions) {
 	if !opts.Debug {
 		t.Fatal("expected debug flag")
 	}
+}
+
+type pollerFakeStatusClient struct {
+	t         *testing.T
+	responses []KernelStatusResponse
+	calls     int
+}
+
+func (f *pollerFakeStatusClient) KernelStatus(context.Context, KernelStatusRequest) (KernelStatusResponse, error) {
+	if f.calls >= len(f.responses) {
+		f.t.Fatalf("unexpected KernelStatus call %d", f.calls+1)
+	}
+	resp := f.responses[f.calls]
+	f.calls++
+	return resp, nil
 }
