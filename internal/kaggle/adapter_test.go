@@ -59,7 +59,7 @@ func TestCLIAdapterKernelStatus(t *testing.T) {
 				t.Fatalf("unexpected args %#v", args)
 			}
 			assertZeroRunOptions(t, opts)
-			return Result{}, nil
+			return Result{Stdout: "status: complete\nmessage: finished\n"}, nil
 		},
 	}
 
@@ -72,8 +72,8 @@ func TestCLIAdapterKernelStatus(t *testing.T) {
 	if resp.KernelRef != "alice/exp142" {
 		t.Fatalf("unexpected kernel ref %q", resp.KernelRef)
 	}
-	if resp.Status != "" || resp.Message != "" {
-		t.Fatalf("expected zero-value status response, got %+v", resp)
+	if resp.Status != "complete" || resp.Message != "finished" {
+		t.Fatalf("unexpected status response %+v", resp)
 	}
 }
 
@@ -141,7 +141,7 @@ func TestCLIAdapterListCompetitionSubmissions(t *testing.T) {
 				t.Fatalf("unexpected args %#v", args)
 			}
 			assertZeroRunOptions(t, opts)
-			return Result{}, nil
+			return Result{Stdout: "file,description,date,status,publicScore\nsubmission.csv,submit from PR #12,2026-04-14T10:00:00Z,complete,0.12345\n"}, nil
 		},
 	}
 
@@ -151,8 +151,11 @@ func TestCLIAdapterListCompetitionSubmissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if len(resp.Submissions) != 0 {
-		t.Fatalf("expected empty submissions, got %+v", resp.Submissions)
+	if len(resp.Submissions) != 1 {
+		t.Fatalf("expected one submission, got %+v", resp.Submissions)
+	}
+	if resp.Submissions[0].FileName != "submission.csv" || resp.Submissions[0].PublicScore != "0.12345" {
+		t.Fatalf("unexpected submission %+v", resp.Submissions[0])
 	}
 }
 
@@ -175,7 +178,155 @@ func TestCLIAdapterPropagatesClientErrors(t *testing.T) {
 		KernelRef: "alice/exp142",
 	})
 	if !errors.Is(err, wantErr) {
-		t.Fatalf("expected %v, got %v", wantErr, err)
+		t.Fatalf("expected wrapped %v, got %v", wantErr, err)
+	}
+	var adapterErr *AdapterError
+	if !errors.As(err, &adapterErr) {
+		t.Fatalf("expected AdapterError, got %T", err)
+	}
+	if adapterErr.Category != ErrorCategoryCommandFailed {
+		t.Fatalf("unexpected category %q", adapterErr.Category)
+	}
+}
+
+func TestCLIAdapterNormalizesMissingCredentials(t *testing.T) {
+	t.Parallel()
+
+	fake := &adapterFakeClient{
+		t: t,
+		runFn: func(_ context.Context, _ []string, _ RunOptions) (Result, error) {
+			return Result{}, &MissingCredentialsError{Missing: []string{envKaggleUsername}}
+		},
+	}
+
+	_, err := (&CLIAdapter{client: fake}).PushKernel(context.Background(), PushKernelRequest{WorkDir: "/tmp/work"})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+
+	var adapterErr *AdapterError
+	if !errors.As(err, &adapterErr) {
+		t.Fatalf("expected AdapterError, got %T", err)
+	}
+	if adapterErr.Category != ErrorCategoryMissingCredentials {
+		t.Fatalf("unexpected category %q", adapterErr.Category)
+	}
+}
+
+func TestCLIAdapterNormalizesPermissionDenied(t *testing.T) {
+	t.Parallel()
+
+	fake := &adapterFakeClient{
+		t: t,
+		runFn: func(_ context.Context, _ []string, _ RunOptions) (Result, error) {
+			return Result{}, &CommandError{
+				ExitCode: 1,
+				Stderr:   "403 Forbidden: you must accept the competition rules",
+				Err:      errors.New("exit status 1"),
+			}
+		},
+	}
+
+	_, err := (&CLIAdapter{client: fake}).SubmitCompetition(context.Background(), CompetitionSubmitRequest{
+		Competition: "playground-series-s6e2",
+		FilePath:    "/tmp/submission.csv",
+		Message:     "submit",
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+
+	var adapterErr *AdapterError
+	if !errors.As(err, &adapterErr) {
+		t.Fatalf("expected AdapterError, got %T", err)
+	}
+	if adapterErr.Category != ErrorCategoryPermissionDenied {
+		t.Fatalf("unexpected category %q", adapterErr.Category)
+	}
+	if adapterErr.Stderr == "" {
+		t.Fatal("expected stderr to be preserved")
+	}
+}
+
+func TestCLIAdapterNormalizesInvalidReference(t *testing.T) {
+	t.Parallel()
+
+	fake := &adapterFakeClient{
+		t: t,
+		runFn: func(_ context.Context, _ []string, _ RunOptions) (Result, error) {
+			return Result{}, &CommandError{
+				ExitCode: 1,
+				Stderr:   "404 Not Found: invalid competition slug",
+				Err:      errors.New("exit status 1"),
+			}
+		},
+	}
+
+	_, err := (&CLIAdapter{client: fake}).ListCompetitionSubmissions(context.Background(), CompetitionSubmissionsRequest{
+		Competition: "missing-comp",
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+
+	var adapterErr *AdapterError
+	if !errors.As(err, &adapterErr) {
+		t.Fatalf("expected AdapterError, got %T", err)
+	}
+	if adapterErr.Category != ErrorCategoryInvalidReference {
+		t.Fatalf("unexpected category %q", adapterErr.Category)
+	}
+}
+
+func TestCLIAdapterReportsUnexpectedKernelStatusOutput(t *testing.T) {
+	t.Parallel()
+
+	fake := &adapterFakeClient{
+		t: t,
+		runFn: func(_ context.Context, _ []string, _ RunOptions) (Result, error) {
+			return Result{Stdout: "kernel is doing something\n"}, nil
+		},
+	}
+
+	_, err := (&CLIAdapter{client: fake}).KernelStatus(context.Background(), KernelStatusRequest{
+		KernelRef: "alice/exp142",
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+
+	var adapterErr *AdapterError
+	if !errors.As(err, &adapterErr) {
+		t.Fatalf("expected AdapterError, got %T", err)
+	}
+	if adapterErr.Category != ErrorCategoryUnexpectedOutput {
+		t.Fatalf("unexpected category %q", adapterErr.Category)
+	}
+}
+
+func TestCLIAdapterReportsUnexpectedSubmissionsOutput(t *testing.T) {
+	t.Parallel()
+
+	fake := &adapterFakeClient{
+		t: t,
+		runFn: func(_ context.Context, _ []string, _ RunOptions) (Result, error) {
+			return Result{Stdout: "submission.csv only\n"}, nil
+		},
+	}
+
+	_, err := (&CLIAdapter{client: fake}).ListCompetitionSubmissions(context.Background(), CompetitionSubmissionsRequest{
+		Competition: "playground-series-s6e2",
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+
+	var adapterErr *AdapterError
+	if !errors.As(err, &adapterErr) {
+		t.Fatalf("expected AdapterError, got %T", err)
+	}
+	if adapterErr.Category != ErrorCategoryUnexpectedOutput {
+		t.Fatalf("unexpected category %q", adapterErr.Category)
 	}
 }
 
@@ -455,5 +606,8 @@ func assertZeroRunOptions(t *testing.T, opts RunOptions) {
 	}
 	if opts.Timeout != 0 {
 		t.Fatalf("unexpected timeout %s", opts.Timeout)
+	}
+	if opts.Debug {
+		t.Fatal("unexpected debug flag")
 	}
 }

@@ -3,6 +3,7 @@ package kaggle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,7 @@ func TestClientRunSuccess(t *testing.T) {
 
 	runner := &clientFakeRunner{
 		t: t,
-		runFn: func(ctx context.Context, cmd command, opts RunOptions) (Result, error) {
+		runFn: func(ctx context.Context, cmd command, opts execx.Options) (Result, error) {
 			if cmd.Path != "/usr/local/bin/kaggle" {
 				t.Fatalf("unexpected path %q", cmd.Path)
 			}
@@ -71,6 +72,7 @@ func TestClientRunSuccess(t *testing.T) {
 		},
 		func() []string { return []string{"PATH=/usr/bin", "HOME=/base/home"} },
 		30*time.Second,
+		nil,
 	)
 
 	result, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{
@@ -91,7 +93,7 @@ func TestClientRunUsesDefaultTimeout(t *testing.T) {
 	client := NewClientWithDeps(
 		&clientFakeRunner{
 			t: t,
-			runFn: func(ctx context.Context, _ command, opts RunOptions) (Result, error) {
+			runFn: func(ctx context.Context, _ command, opts execx.Options) (Result, error) {
 				if _, ok := ctx.Deadline(); !ok {
 					t.Fatal("expected deadline to be set")
 				}
@@ -108,6 +110,7 @@ func TestClientRunUsesDefaultTimeout(t *testing.T) {
 		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
 		func() []string { return nil },
 		2*time.Second,
+		nil,
 	)
 
 	if _, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{}); err != nil {
@@ -121,7 +124,7 @@ func TestClientRunAppliesBaseEnvForCustomRunner(t *testing.T) {
 	client := NewClientWithDeps(
 		&clientFakeRunner{
 			t: t,
-			runFn: func(ctx context.Context, _ command, opts RunOptions) (Result, error) {
+			runFn: func(ctx context.Context, _ command, opts execx.Options) (Result, error) {
 				if _, ok := ctx.Deadline(); !ok {
 					t.Fatal("expected deadline to be set")
 				}
@@ -137,6 +140,7 @@ func TestClientRunAppliesBaseEnvForCustomRunner(t *testing.T) {
 		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
 		func() []string { return []string{"PATH=/usr/bin", "HOME=/base/home"} },
 		time.Second,
+		nil,
 	)
 
 	if _, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{
@@ -152,7 +156,7 @@ func TestClientRunUsesExplicitTimeoutOverride(t *testing.T) {
 	client := NewClientWithDeps(
 		&clientFakeRunner{
 			t: t,
-			runFn: func(ctx context.Context, _ command, opts RunOptions) (Result, error) {
+			runFn: func(ctx context.Context, _ command, opts execx.Options) (Result, error) {
 				if _, ok := ctx.Deadline(); !ok {
 					t.Fatal("expected deadline to be set")
 				}
@@ -169,6 +173,7 @@ func TestClientRunUsesExplicitTimeoutOverride(t *testing.T) {
 		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
 		func() []string { return nil },
 		10*time.Second,
+		nil,
 	)
 
 	if _, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{
@@ -184,7 +189,7 @@ func TestClientRunClassifiesTimeout(t *testing.T) {
 	client := NewClientWithDeps(
 		&clientFakeRunner{
 			t: t,
-			runFn: func(ctx context.Context, _ command, _ RunOptions) (Result, error) {
+			runFn: func(ctx context.Context, _ command, _ execx.Options) (Result, error) {
 				<-ctx.Done()
 				return Result{}, ctx.Err()
 			},
@@ -196,6 +201,7 @@ func TestClientRunClassifiesTimeout(t *testing.T) {
 		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
 		func() []string { return nil },
 		10*time.Millisecond,
+		nil,
 	)
 
 	_, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{})
@@ -218,7 +224,7 @@ func TestClientRunClassifiesCommandFailure(t *testing.T) {
 	client := NewClientWithDeps(
 		&clientFakeRunner{
 			t: t,
-			runFn: func(context.Context, command, RunOptions) (Result, error) {
+			runFn: func(context.Context, command, execx.Options) (Result, error) {
 				result := Result{
 					Stdout:   "partial output",
 					Stderr:   "bad things happened",
@@ -237,6 +243,7 @@ func TestClientRunClassifiesCommandFailure(t *testing.T) {
 		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
 		func() []string { return nil },
 		time.Second,
+		nil,
 	)
 
 	result, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{})
@@ -273,6 +280,7 @@ func TestClientRunReturnsExecutableLookupError(t *testing.T) {
 		},
 		func() []string { return nil },
 		time.Second,
+		nil,
 	)
 
 	_, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{})
@@ -291,7 +299,7 @@ func TestClientRunSupportsTokenAuth(t *testing.T) {
 
 	runner := &clientFakeRunner{
 		t: t,
-		runFn: func(_ context.Context, cmd command, opts RunOptions) (Result, error) {
+		runFn: func(_ context.Context, cmd command, opts execx.Options) (Result, error) {
 			if !equalStrings(cmd.Args, []string{"kernels", "status"}) {
 				t.Fatalf("unexpected args %#v", cmd.Args)
 			}
@@ -324,6 +332,7 @@ func TestClientRunSupportsTokenAuth(t *testing.T) {
 		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
 		func() []string { return []string{"PATH=/usr/bin"} },
 		time.Second,
+		nil,
 	)
 
 	if _, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{}); err != nil {
@@ -331,12 +340,96 @@ func TestClientRunSupportsTokenAuth(t *testing.T) {
 	}
 }
 
-type clientFakeRunner struct {
-	t     *testing.T
-	runFn func(context.Context, command, RunOptions) (Result, error)
+func TestClientRunLogsDebugContextWithRedaction(t *testing.T) {
+	t.Parallel()
+
+	logger := &fakeOperationLogger{}
+	client := NewClientWithDeps(
+		&clientFakeRunner{
+			t: t,
+			runFn: func(_ context.Context, _ command, _ execx.Options) (Result, error) {
+				return Result{ExitCode: 0}, nil
+			},
+		},
+		staticEnvSource{
+			envKaggleUsername: "alice",
+			envKaggleKey:      "secret-key",
+		},
+		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
+		func() []string { return []string{"PATH=/usr/bin", envKaggleAPIToken + "=base-secret"} },
+		time.Second,
+		logger,
+	)
+
+	if _, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{
+		Debug: true,
+		Env: []string{
+			envKaggleUsername + "=alice",
+			"HOME=/tmp/home",
+		},
+	}); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(logger.infoLogs) < 2 {
+		t.Fatalf("expected info logs, got %+v", logger.infoLogs)
+	}
+	start := strings.Join(logger.infoLogs[0].attrs, " ")
+	if !strings.Contains(start, "operation kernels status") {
+		t.Fatalf("unexpected log attrs %q", start)
+	}
+	if !strings.Contains(start, envKaggleUsername+"=[REDACTED]") {
+		t.Fatalf("expected redacted username in %q", start)
+	}
+	if !strings.Contains(start, envKaggleAPIToken+"=[REDACTED]") {
+		t.Fatalf("expected redacted token in %q", start)
+	}
+	if strings.Contains(start, "secret-key") || strings.Contains(start, "base-secret") {
+		t.Fatalf("unexpected secret leakage in %q", start)
+	}
 }
 
-func (f *clientFakeRunner) Run(ctx context.Context, cmd command, opts RunOptions) (Result, error) {
+func TestClientRunLogsActionableFailure(t *testing.T) {
+	t.Parallel()
+
+	logger := &fakeOperationLogger{}
+	client := NewClientWithDeps(
+		&clientFakeRunner{
+			t: t,
+			runFn: func(_ context.Context, _ command, _ execx.Options) (Result, error) {
+				result := Result{ExitCode: 2, Stderr: "permission denied"}
+				return result, &execx.ExitError{Result: result, Err: errors.New("exit status 2")}
+			},
+		},
+		staticEnvSource{
+			envKaggleUsername: "alice",
+			envKaggleKey:      "secret-key",
+		},
+		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
+		func() []string { return nil },
+		time.Second,
+		logger,
+	)
+
+	if _, err := client.Run(context.Background(), []string{"competitions", "submit"}, RunOptions{}); err == nil {
+		t.Fatal("expected an error")
+	}
+
+	if len(logger.errorLogs) == 0 {
+		t.Fatal("expected error logs")
+	}
+	entry := strings.Join(logger.errorLogs[0].attrs, " ")
+	if !strings.Contains(entry, "exit_code 2") || !strings.Contains(entry, "permission denied") {
+		t.Fatalf("unexpected error log attrs %q", entry)
+	}
+}
+
+type clientFakeRunner struct {
+	t     *testing.T
+	runFn func(context.Context, command, execx.Options) (Result, error)
+}
+
+func (f *clientFakeRunner) Run(ctx context.Context, cmd command, opts execx.Options) (Result, error) {
 	if f.runFn == nil {
 		f.t.Fatal("runFn must be set")
 	}
@@ -363,4 +456,34 @@ func equalStrings(left []string, right []string) bool {
 		}
 	}
 	return true
+}
+
+type fakeOperationLogger struct {
+	infoLogs  []fakeLogEntry
+	errorLogs []fakeLogEntry
+}
+
+type fakeLogEntry struct {
+	msg   string
+	attrs []string
+}
+
+func (l *fakeOperationLogger) InfoContext(_ context.Context, msg string, args ...any) {
+	l.infoLogs = append(l.infoLogs, fakeLogEntry{msg: msg, attrs: stringifyAttrs(args)})
+}
+
+func (l *fakeOperationLogger) ErrorContext(_ context.Context, msg string, args ...any) {
+	l.errorLogs = append(l.errorLogs, fakeLogEntry{msg: msg, attrs: stringifyAttrs(args)})
+}
+
+func stringifyAttrs(args []any) []string {
+	values := make([]string, 0, len(args))
+	for i := 0; i < len(args); i += 2 {
+		if i+1 >= len(args) {
+			values = append(values, fmt.Sprint(args[i]))
+			continue
+		}
+		values = append(values, fmt.Sprintf("%v %v", args[i], args[i+1]))
+	}
+	return values
 }
