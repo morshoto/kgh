@@ -159,6 +159,244 @@ func TestCLIAdapterListCompetitionSubmissions(t *testing.T) {
 	}
 }
 
+func TestCLIAdapterForwardsDebugFlag(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		run  func(*CLIAdapter) error
+		want []string
+	}{
+		{
+			name: "push kernel",
+			run: func(adapter *CLIAdapter) error {
+				_, err := adapter.PushKernel(context.Background(), PushKernelRequest{
+					WorkDir: "/tmp/work tree",
+					Debug:   true,
+				})
+				return err
+			},
+			want: []string{"kernels", "push", "-p", "/tmp/work tree"},
+		},
+		{
+			name: "kernel status",
+			run: func(adapter *CLIAdapter) error {
+				_, err := adapter.KernelStatus(context.Background(), KernelStatusRequest{
+					KernelRef: "alice/exp142",
+					Debug:     true,
+				})
+				return err
+			},
+			want: []string{"kernels", "status", "-p", "alice/exp142"},
+		},
+		{
+			name: "download kernel output",
+			run: func(adapter *CLIAdapter) error {
+				_, err := adapter.DownloadKernelOutput(context.Background(), DownloadKernelOutputRequest{
+					KernelRef: "alice/exp142",
+					OutputDir: "/tmp/output dir",
+					Debug:     true,
+				})
+				return err
+			},
+			want: []string{"kernels", "output", "alice/exp142", "-p", "/tmp/output dir"},
+		},
+		{
+			name: "submit competition",
+			run: func(adapter *CLIAdapter) error {
+				_, err := adapter.SubmitCompetition(context.Background(), CompetitionSubmitRequest{
+					Competition: "playground-series-s6e2",
+					FilePath:    "/tmp/submission csv",
+					Message:     "submit from PR #12",
+					Debug:       true,
+				})
+				return err
+			},
+			want: []string{"competitions", "submit", "-c", "playground-series-s6e2", "-f", "/tmp/submission csv", "-m", "submit from PR #12"},
+		},
+		{
+			name: "list competition submissions",
+			run: func(adapter *CLIAdapter) error {
+				_, err := adapter.ListCompetitionSubmissions(context.Background(), CompetitionSubmissionsRequest{
+					Competition: "playground-series-s6e2",
+					Debug:       true,
+				})
+				return err
+			},
+			want: []string{"competitions", "submissions", "-c", "playground-series-s6e2"},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			fake := &adapterFakeClient{
+				t: t,
+				runFn: func(_ context.Context, args []string, opts RunOptions) (Result, error) {
+					if !equalStrings(args, tt.want) {
+						t.Fatalf("unexpected args %#v", args)
+					}
+					assertDebugRunOptions(t, opts)
+					switch tt.name {
+					case "kernel status":
+						return Result{Stdout: "status: complete\nmessage: finished\n"}, nil
+					case "list competition submissions":
+						return Result{Stdout: "file,description,date,status,publicScore\nsubmission.csv,submit from PR #12,2026-04-14T10:00:00Z,complete,0.12345\n"}, nil
+					default:
+						return Result{}, nil
+					}
+				},
+			}
+
+			if err := tt.run(&CLIAdapter{client: fake}); err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestCLIAdapterNormalizesOperationFailures(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		run          func(*CLIAdapter) error
+		runErr       error
+		wantCategory ErrorCategory
+	}{
+		{
+			name: "push kernel missing credentials",
+			run: func(adapter *CLIAdapter) error {
+				_, err := adapter.PushKernel(context.Background(), PushKernelRequest{WorkDir: "/tmp/work"})
+				return err
+			},
+			runErr:       &MissingCredentialsError{Missing: []string{envKaggleUsername}},
+			wantCategory: ErrorCategoryMissingCredentials,
+		},
+		{
+			name: "kernel status invalid credentials",
+			run: func(adapter *CLIAdapter) error {
+				_, err := adapter.KernelStatus(context.Background(), KernelStatusRequest{KernelRef: "alice/exp142"})
+				return err
+			},
+			runErr: &CommandError{
+				ExitCode: 1,
+				Stderr:   "401 Unauthorized: invalid credentials",
+				Err:      errors.New("exit status 1"),
+			},
+			wantCategory: ErrorCategoryInvalidCredentials,
+		},
+		{
+			name: "download kernel output command failure",
+			run: func(adapter *CLIAdapter) error {
+				_, err := adapter.DownloadKernelOutput(context.Background(), DownloadKernelOutputRequest{
+					KernelRef: "alice/exp142",
+					OutputDir: "/tmp/output",
+				})
+				return err
+			},
+			runErr: &CommandError{
+				ExitCode: 1,
+				Stderr:   "something unexpected happened",
+				Err:      errors.New("exit status 1"),
+			},
+			wantCategory: ErrorCategoryCommandFailed,
+		},
+		{
+			name: "submit competition permission denied",
+			run: func(adapter *CLIAdapter) error {
+				_, err := adapter.SubmitCompetition(context.Background(), CompetitionSubmitRequest{
+					Competition: "playground-series-s6e2",
+					FilePath:    "/tmp/submission.csv",
+					Message:     "submit",
+				})
+				return err
+			},
+			runErr: &CommandError{
+				ExitCode: 1,
+				Stderr:   "403 Forbidden: you must accept the rules",
+				Err:      errors.New("exit status 1"),
+			},
+			wantCategory: ErrorCategoryPermissionDenied,
+		},
+		{
+			name: "list competition submissions invalid reference",
+			run: func(adapter *CLIAdapter) error {
+				_, err := adapter.ListCompetitionSubmissions(context.Background(), CompetitionSubmissionsRequest{
+					Competition: "missing-comp",
+				})
+				return err
+			},
+			runErr: &CommandError{
+				ExitCode: 1,
+				Stderr:   "404 Not Found: invalid competition slug",
+				Err:      errors.New("exit status 1"),
+			},
+			wantCategory: ErrorCategoryInvalidReference,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			fake := &adapterFakeClient{
+				t: t,
+				runFn: func(_ context.Context, _ []string, opts RunOptions) (Result, error) {
+					if opts.Debug {
+						t.Fatal("did not expect debug mode")
+					}
+					return Result{}, tt.runErr
+				},
+			}
+
+			err := tt.run(&CLIAdapter{client: fake})
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+
+			var adapterErr *AdapterError
+			if !errors.As(err, &adapterErr) {
+				t.Fatalf("expected AdapterError, got %T", err)
+			}
+			if adapterErr.Category != tt.wantCategory {
+				t.Fatalf("unexpected category %q", adapterErr.Category)
+			}
+		})
+	}
+}
+
+func TestCLIAdapterReportsMalformedSubmissionDate(t *testing.T) {
+	t.Parallel()
+
+	fake := &adapterFakeClient{
+		t: t,
+		runFn: func(_ context.Context, _ []string, _ RunOptions) (Result, error) {
+			return Result{
+				Stdout: "file,description,date,status,publicScore\nsubmission.csv,submit,not-a-date,complete,0.12345\n",
+			}, nil
+		},
+	}
+
+	_, err := (&CLIAdapter{client: fake}).ListCompetitionSubmissions(context.Background(), CompetitionSubmissionsRequest{
+		Competition: "playground-series-s6e2",
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+
+	var adapterErr *AdapterError
+	if !errors.As(err, &adapterErr) {
+		t.Fatalf("expected AdapterError, got %T", err)
+	}
+	if adapterErr.Category != ErrorCategoryUnexpectedOutput {
+		t.Fatalf("unexpected category %q", adapterErr.Category)
+	}
+}
+
 func TestCLIAdapterPropagatesClientErrors(t *testing.T) {
 	t.Parallel()
 
@@ -609,5 +847,22 @@ func assertZeroRunOptions(t *testing.T, opts RunOptions) {
 	}
 	if opts.Debug {
 		t.Fatal("unexpected debug flag")
+	}
+}
+
+func assertDebugRunOptions(t *testing.T, opts RunOptions) {
+	t.Helper()
+
+	if opts.Dir != "" {
+		t.Fatalf("unexpected dir %q", opts.Dir)
+	}
+	if len(opts.Env) != 0 {
+		t.Fatalf("unexpected env %#v", opts.Env)
+	}
+	if opts.Timeout != 0 {
+		t.Fatalf("unexpected timeout %s", opts.Timeout)
+	}
+	if !opts.Debug {
+		t.Fatal("expected debug flag")
 	}
 }

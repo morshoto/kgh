@@ -25,3 +25,25 @@ go test ./...
 go build ./cmd/kgh
 ./kgh version
 ```
+
+### Kaggle smoke test
+
+Use the live smoke path only when you need to validate the adapter against real Kaggle credentials and the Kaggle CLI.
+It is intentionally opt-in and is not part of default CI.
+
+```bash
+export KGH_KAGGLE_SMOKE=1
+export KGH_KAGGLE_SMOKE_COMPETITION=<competition-slug>
+export KAGGLE_API_TOKEN=<token>
+# or:
+# export KAGGLE_USERNAME=<username>
+# export KAGGLE_KEY=<key>
+
+make smoke-kaggle
+```
+
+The smoke test runs a read-only submissions listing through the Kaggle adapter. Use a competition you have access to and have already joined. If you prefer not to use `make`, the equivalent command is:
+
+```bash
+KGH_KAGGLE_SMOKE=1 KGH_KAGGLE_SMOKE_COMPETITION=<competition-slug> go test -tags smoke ./internal/kaggle -run '^TestSmokeKaggleAdapterLive$' -count=1
+```
