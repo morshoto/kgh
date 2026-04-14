@@ -92,7 +92,7 @@ func TestCLIAdapterKernelStatus(t *testing.T) {
 	fake := &adapterFakeClient{
 		t: t,
 		runFn: func(_ context.Context, args []string, opts RunOptions) (Result, error) {
-			if !equalStrings(args, []string{"kernels", "status", "-p", "alice/exp142"}) {
+			if !equalStrings(args, []string{"kernels", "status", "alice/exp142"}) {
 				t.Fatalf("unexpected args %#v", args)
 			}
 			assertZeroRunOptions(t, opts)
@@ -358,7 +358,7 @@ func TestCLIAdapterForwardsDebugFlag(t *testing.T) {
 				})
 				return err
 			},
-			want: []string{"kernels", "status", "-p", "alice/exp142"},
+			want: []string{"kernels", "status", "alice/exp142"},
 		},
 		{
 			name: "poll kernel status",
@@ -369,7 +369,7 @@ func TestCLIAdapterForwardsDebugFlag(t *testing.T) {
 				})
 				return err
 			},
-			want: []string{"kernels", "status", "-p", "alice/exp142"},
+			want: []string{"kernels", "status", "alice/exp142"},
 		},
 		{
 			name: "download kernel output",
@@ -603,7 +603,7 @@ func TestCLIAdapterPropagatesClientErrors(t *testing.T) {
 	fake := &adapterFakeClient{
 		t: t,
 		runFn: func(_ context.Context, args []string, opts RunOptions) (Result, error) {
-			if !equalStrings(args, []string{"kernels", "status", "-p", "alice/exp142"}) {
+			if !equalStrings(args, []string{"kernels", "status", "alice/exp142"}) {
 				t.Fatalf("unexpected args %#v", args)
 			}
 			assertZeroRunOptions(t, opts)
@@ -841,7 +841,7 @@ func TestBuildKernelStatusCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if !equalStrings(got, []string{"kernels", "status", "-p", "alice/exp142"}) {
+	if !equalStrings(got, []string{"kernels", "status", "alice/exp142"}) {
 		t.Fatalf("unexpected args %#v", got)
 	}
 }

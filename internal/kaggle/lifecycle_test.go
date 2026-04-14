@@ -23,7 +23,7 @@ func TestKernelLifecyclePushStatusAndPollSuccess(t *testing.T) {
 				},
 			},
 			{
-				args: []string{"kernels", "status", "-p", "alice/exp142"},
+				args: []string{"kernels", "status", "alice/exp142"},
 				result: Result{
 					Stdout:   "status: running\nmessage: queued for execution\n",
 					Stderr:   "",
@@ -31,7 +31,7 @@ func TestKernelLifecyclePushStatusAndPollSuccess(t *testing.T) {
 				},
 			},
 			{
-				args: []string{"kernels", "status", "-p", "alice/exp142"},
+				args: []string{"kernels", "status", "alice/exp142"},
 				result: Result{
 					Stdout:   "status: running\nmessage: still queued\n",
 					Stderr:   "",
@@ -39,7 +39,7 @@ func TestKernelLifecyclePushStatusAndPollSuccess(t *testing.T) {
 				},
 			},
 			{
-				args: []string{"kernels", "status", "-p", "alice/exp142"},
+				args: []string{"kernels", "status", "alice/exp142"},
 				result: Result{
 					Stdout:   "status: complete\nmessage: finished\n",
 					Stderr:   "",
@@ -108,7 +108,7 @@ func TestKernelLifecyclePollTimeout(t *testing.T) {
 		t: t,
 		steps: []lifecycleScriptedStep{
 			{
-				args: []string{"kernels", "status", "-p", "alice/exp142"},
+				args: []string{"kernels", "status", "alice/exp142"},
 				result: Result{
 					Stdout:   "status: running\nmessage: queued\n",
 					Stderr:   "",
@@ -116,7 +116,7 @@ func TestKernelLifecyclePollTimeout(t *testing.T) {
 				},
 			},
 			{
-				args: []string{"kernels", "status", "-p", "alice/exp142"},
+				args: []string{"kernels", "status", "alice/exp142"},
 				result: Result{
 					Stdout:   "status: running\nmessage: still queued\n",
 					Stderr:   "",
@@ -124,7 +124,7 @@ func TestKernelLifecyclePollTimeout(t *testing.T) {
 				},
 			},
 			{
-				args: []string{"kernels", "status", "-p", "alice/exp142"},
+				args: []string{"kernels", "status", "alice/exp142"},
 				result: Result{
 					Stdout:   "status: running\nmessage: still queued\n",
 					Stderr:   "",
@@ -175,7 +175,7 @@ func TestKernelLifecycleReportsMalformedStatusOutput(t *testing.T) {
 		t: t,
 		steps: []lifecycleScriptedStep{
 			{
-				args: []string{"kernels", "status", "-p", "alice/exp142"},
+				args: []string{"kernels", "status", "alice/exp142"},
 				result: Result{
 					Stdout:   "message: queued\n",
 					Stderr:   "",
@@ -208,7 +208,7 @@ func TestKernelLifecycleReportsFailingStatusCommand(t *testing.T) {
 		t: t,
 		steps: []lifecycleScriptedStep{
 			{
-				args: []string{"kernels", "status", "-p", "alice/exp142"},
+				args: []string{"kernels", "status", "alice/exp142"},
 				err: &CommandError{
 					ExitCode: 1,
 					Stderr:   "401 Unauthorized: invalid credentials",

@@ -253,7 +253,7 @@ func buildKernelStatusCommand(req KernelStatusRequest) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []string{"kernels", "status", "-p", kernelRef}, nil
+	return []string{"kernels", "status", kernelRef}, nil
 }
 
 func buildDownloadKernelOutputCommand(req DownloadKernelOutputRequest) ([]string, error) {
