@@ -34,6 +34,9 @@ func TestKernelPollerStopsOnTerminalStatus(t *testing.T) {
 	if result.Status != "complete" || result.Message != "finished" {
 		t.Fatalf("unexpected result %+v", result)
 	}
+	if result.Terminal != KernelPollTerminalStateSucceeded {
+		t.Fatalf("unexpected terminal state %q", result.Terminal)
+	}
 	if result.StartedAt != time.Unix(0, 0) {
 		t.Fatalf("unexpected start time %s", result.StartedAt)
 	}
@@ -121,6 +124,9 @@ func TestKernelPollerReturnsTimeoutError(t *testing.T) {
 	if result.Status != "running" || result.Message != "still queued" {
 		t.Fatalf("unexpected partial result %+v", result)
 	}
+	if result.Terminal != KernelPollTerminalStateUnknown {
+		t.Fatalf("unexpected terminal state %q", result.Terminal)
+	}
 	if result.Elapsed != 5*time.Second {
 		t.Fatalf("unexpected elapsed %s", result.Elapsed)
 	}
@@ -156,6 +162,82 @@ func TestKernelPollerHonorsContextCancellation(t *testing.T) {
 	}
 }
 
+func TestKernelPollerReturnsTerminalErrorForFailedStatus(t *testing.T) {
+	t.Parallel()
+
+	clock := &pollerClock{now: time.Unix(0, 0)}
+	client := &pollerFakeClient{
+		t: t,
+		responses: []KernelStatusResponse{
+			{KernelRef: "alice/exp142", Status: "running", Message: "queued"},
+			{KernelRef: "alice/exp142", Status: "failed", Message: "kernel crashed"},
+		},
+	}
+	poller := NewKernelPollerWithDeps(client, clock.Now, clock.Sleep)
+
+	result, err := poller.Poll(context.Background(), KernelPollRequest{
+		KernelRef: "alice/exp142",
+		Interval:  2 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	var terminalErr *KernelPollTerminalError
+	if !errors.As(err, &terminalErr) {
+		t.Fatalf("expected KernelPollTerminalError, got %T", err)
+	}
+	if terminalErr.Terminal != KernelPollTerminalStateFailed {
+		t.Fatalf("unexpected terminal state %q", terminalErr.Terminal)
+	}
+	if terminalErr.LastStatus != "failed" || terminalErr.LastMessage != "kernel crashed" {
+		t.Fatalf("unexpected terminal error %+v", terminalErr)
+	}
+	if result.Terminal != KernelPollTerminalStateFailed {
+		t.Fatalf("unexpected result terminal state %q", result.Terminal)
+	}
+	if result.Attempts != 2 {
+		t.Fatalf("unexpected attempts %d", result.Attempts)
+	}
+}
+
+func TestKernelPollerReturnsTerminalErrorForCancelledStatus(t *testing.T) {
+	t.Parallel()
+
+	clock := &pollerClock{now: time.Unix(0, 0)}
+	client := &pollerFakeClient{
+		t: t,
+		responses: []KernelStatusResponse{
+			{KernelRef: "alice/exp142", Status: "running", Message: "queued"},
+			{KernelRef: "alice/exp142", Status: "cancelled", Message: "user cancelled"},
+		},
+	}
+	poller := NewKernelPollerWithDeps(client, clock.Now, clock.Sleep)
+
+	result, err := poller.Poll(context.Background(), KernelPollRequest{
+		KernelRef: "alice/exp142",
+		Interval:  2 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	var terminalErr *KernelPollTerminalError
+	if !errors.As(err, &terminalErr) {
+		t.Fatalf("expected KernelPollTerminalError, got %T", err)
+	}
+	if terminalErr.Terminal != KernelPollTerminalStateCancelled {
+		t.Fatalf("unexpected terminal state %q", terminalErr.Terminal)
+	}
+	if terminalErr.LastStatus != "cancelled" || terminalErr.LastMessage != "user cancelled" {
+		t.Fatalf("unexpected terminal error %+v", terminalErr)
+	}
+	if result.Terminal != KernelPollTerminalStateCancelled {
+		t.Fatalf("unexpected result terminal state %q", result.Terminal)
+	}
+	if result.Attempts != 2 {
+		t.Fatalf("unexpected attempts %d", result.Attempts)
+	}
+}
+
 func TestIsTerminalKernelStatus(t *testing.T) {
 	t.Parallel()
 
@@ -179,6 +261,35 @@ func TestIsTerminalKernelStatus(t *testing.T) {
 
 			if got := isTerminalKernelStatus(tt.status); got != tt.want {
 				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestClassifyTerminalKernelStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		status string
+		want   KernelPollTerminalState
+		ok     bool
+	}{
+		{status: "complete", want: KernelPollTerminalStateSucceeded, ok: true},
+		{status: "failed", want: KernelPollTerminalStateFailed, ok: true},
+		{status: "error", want: KernelPollTerminalStateFailed, ok: true},
+		{status: "cancelled", want: KernelPollTerminalStateCancelled, ok: true},
+		{status: "aborted", want: KernelPollTerminalStateCancelled, ok: true},
+		{status: "running", want: KernelPollTerminalStateUnknown, ok: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.status, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := classifyTerminalKernelStatus(tt.status)
+			if got != tt.want || ok != tt.ok {
+				t.Fatalf("unexpected classification got=(%q,%v) want=(%q,%v)", got, ok, tt.want, tt.ok)
 			}
 		})
 	}

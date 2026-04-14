@@ -41,7 +41,43 @@ type KernelPollResult struct {
 	StartedAt  time.Time
 	FinishedAt time.Time
 	Elapsed    time.Duration
+	Terminal   KernelPollTerminalState
 }
+
+// KernelPollTerminalState classifies the final observed poll outcome.
+type KernelPollTerminalState string
+
+const (
+	KernelPollTerminalStateUnknown   KernelPollTerminalState = ""
+	KernelPollTerminalStateSucceeded KernelPollTerminalState = "succeeded"
+	KernelPollTerminalStateFailed    KernelPollTerminalState = "failed"
+	KernelPollTerminalStateCancelled KernelPollTerminalState = "cancelled"
+)
+
+// KernelPollTerminalError reports a terminal non-success run state with context.
+type KernelPollTerminalError struct {
+	KernelRef   string
+	Terminal    KernelPollTerminalState
+	Attempts    int
+	LastStatus  string
+	LastMessage string
+	Err         error
+}
+
+func (e *KernelPollTerminalError) Error() string {
+	if e == nil {
+		return "kaggle kernel run terminated"
+	}
+	if e.KernelRef == "" {
+		return fmt.Sprintf("kaggle kernel run terminated: %s", e.Terminal)
+	}
+	if e.LastStatus == "" {
+		return fmt.Sprintf("kaggle kernel %s run terminated: %s", e.KernelRef, e.Terminal)
+	}
+	return fmt.Sprintf("kaggle kernel %s run terminated: %s (last status: %s)", e.KernelRef, e.Terminal, e.LastStatus)
+}
+
+func (e *KernelPollTerminalError) Unwrap() error { return e.Err }
 
 // KernelPollTimeoutError reports that polling stopped because the timeout expired.
 type KernelPollTimeoutError struct {
@@ -146,9 +182,20 @@ func (p *KernelPoller) Poll(ctx context.Context, req KernelPollRequest) (KernelP
 
 		result.KernelStatusResponse = status
 		result.Attempts = attempts
-		if isTerminalKernelStatus(status.Status) {
+		terminalState, terminal := classifyTerminalKernelStatus(status.Status)
+		if terminal {
 			result.FinishedAt = p.now()
 			result.Elapsed = result.FinishedAt.Sub(startedAt)
+			result.Terminal = terminalState
+			if terminalState != KernelPollTerminalStateSucceeded {
+				return result, &KernelPollTerminalError{
+					KernelRef:   kernelRef,
+					Terminal:    terminalState,
+					Attempts:    attempts,
+					LastStatus:  result.Status,
+					LastMessage: result.Message,
+				}
+			}
 			return result, nil
 		}
 
@@ -201,10 +248,19 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 }
 
 func isTerminalKernelStatus(status string) bool {
+	_, terminal := classifyTerminalKernelStatus(status)
+	return terminal
+}
+
+func classifyTerminalKernelStatus(status string) (KernelPollTerminalState, bool) {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "complete", "completed", "failed", "failure", "error", "cancelled", "canceled", "aborted", "terminated":
-		return true
+	case "complete", "completed":
+		return KernelPollTerminalStateSucceeded, true
+	case "failed", "failure", "error":
+		return KernelPollTerminalStateFailed, true
+	case "cancelled", "canceled", "aborted", "terminated":
+		return KernelPollTerminalStateCancelled, true
 	default:
-		return false
+		return KernelPollTerminalStateUnknown, false
 	}
 }
