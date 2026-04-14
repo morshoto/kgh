@@ -24,26 +24,9 @@ body:
           required: false
 
     - type: textarea
-      id: impact
-      attributes:
-          label: 'Impact Scope'
-          description: 'If applicable, please specify the areas or teams that will be affected'
-      validations:
-          required: false
-
-    - type: textarea
-      id: links
+      id: links and screenshots
       attributes:
           label: 'Related Links'
           description: 'Links to related issues, PRs, or documentation'
-      validations:
-          required: false
-
-    - type: textarea
-      id: screenshots
-      attributes:
-          label: 'Screenshots'
-          description: 'Attach screenshots or .gif files to help illustrate the feature'
-          placeholder: 'Drag and drop images here'
       validations:
           required: false

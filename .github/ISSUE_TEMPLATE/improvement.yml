@@ -14,7 +14,7 @@ body:
           required: true
 
     - type: textarea
-      id: links
+      id: links and screenshots
       attributes:
           label: 'Related Links'
           description: 'Links to related issues, PRs, or documentation'
