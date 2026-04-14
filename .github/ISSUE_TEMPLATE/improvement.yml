@@ -1,6 +1,6 @@
 name: '♻️ Improvement / Refactor'
 description: 'Suggest an improvement or refactor for the project. Please provide as much detail as possible to help us understand and evaluate your suggestion.'
-title: '♻️ '
+title: '[Improvement] '
 labels:
     - 'Type: Improvement'
 body:

@@ -1,6 +1,6 @@
 name: '❓ Question'
 description: 'Ask a question or request clarification about the project. Please provide as much detail as possible to help us understand your question.'
-title: '❓ '
+title: '[Question] '
 labels:
     - 'Feedback: Question'
 body:

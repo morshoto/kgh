@@ -1,6 +1,6 @@
 name: '🎨 Design/Interface'
 description: 'Suggest a design proposal for the project. Please provide as much detail as possible to help us understand and evaluate your suggestion.'
-title: '🎨 '
+title: '[Design] '
 labels:
     - 'Type: Design'
 body:
