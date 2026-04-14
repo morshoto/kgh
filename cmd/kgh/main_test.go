@@ -20,6 +20,18 @@ func TestRun_StripsCommandNamePrefix(t *testing.T) {
 	}
 }
 
+func TestRunHelpMentionsRun(t *testing.T) {
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+
+	if code := runWithIO([]string{"help"}, stdout, stderr); code != 0 {
+		t.Fatalf("expected exit code 0, got %d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "run       Resolve and execute a Kaggle target") {
+		t.Fatalf("expected run command in help output, got %s", stdout.String())
+	}
+}
+
 func TestRun_UnknownCommand(t *testing.T) {
 	if code := run([]string{"wat"}); code != 1 {
 		t.Fatalf("expected exit code 1, got %d", code)

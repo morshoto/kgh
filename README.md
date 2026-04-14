@@ -26,6 +26,13 @@ go build ./cmd/kgh
 ./kgh version
 ```
 
+To run a target locally, create `.kgh/config.yaml` from `.kgh/config_example.yaml` and then:
+
+```bash
+./kgh run --target exp142
+./kgh run --target exp142 --dry-run=false
+```
+
 ### Kaggle smoke test
 
 Use the live smoke path only when you need to validate the adapter against real Kaggle credentials and the Kaggle CLI.
