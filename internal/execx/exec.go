@@ -97,7 +97,7 @@ func (r runner) Run(ctx context.Context, cmd Command, opts Options) (Result, err
 
 	runCtx := ctx
 	cancel := func() {}
-	if opts.Timeout > 0 {
+	if _, hasDeadline := ctx.Deadline(); opts.Timeout > 0 && !hasDeadline {
 		runCtx, cancel = context.WithTimeoutCause(ctx, opts.Timeout, errCommandTimeout)
 	}
 	defer cancel()

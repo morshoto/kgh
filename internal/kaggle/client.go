@@ -123,12 +123,15 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 		timeout = c.defaultTimeout
 	}
 
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	command := command{
 		Path: binaryPath,
 		Args: append([]string(nil), args...),
 	}
 
-	result, err := c.runner.Run(ctx, command, RunOptions{
+	result, err := c.runner.Run(runCtx, command, RunOptions{
 		Dir:     opts.Dir,
 		Env:     execx.MergeEnv(c.baseEnv(), append(runtimeSetup.Env, opts.Env...)),
 		Timeout: timeout,
@@ -139,6 +142,14 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 
 	var timeoutErr *execx.TimeoutError
 	if errors.As(err, &timeoutErr) {
+		return result, &TimeoutError{
+			Args:    append([]string(nil), args...),
+			Timeout: timeout,
+			Err:     err,
+		}
+	}
+
+	if errors.Is(runCtx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
 		return result, &TimeoutError{
 			Args:    append([]string(nil), args...),
 			Timeout: timeout,

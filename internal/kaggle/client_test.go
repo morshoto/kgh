@@ -17,7 +17,7 @@ func TestClientRunSuccess(t *testing.T) {
 
 	runner := &clientFakeRunner{
 		t: t,
-		runFn: func(_ context.Context, cmd command, opts RunOptions) (Result, error) {
+		runFn: func(ctx context.Context, cmd command, opts RunOptions) (Result, error) {
 			if cmd.Path != "/usr/local/bin/kaggle" {
 				t.Fatalf("unexpected path %q", cmd.Path)
 			}
@@ -45,6 +45,9 @@ func TestClientRunSuccess(t *testing.T) {
 				if !strings.Contains(string(payload), `"username":"alice"`) || !strings.Contains(string(payload), `"key":"secret-key"`) {
 					t.Fatalf("unexpected kaggle.json content %q", string(payload))
 				}
+			}
+			if _, ok := ctx.Deadline(); !ok {
+				t.Fatal("expected deadline to be set")
 			}
 			return Result{
 				Stdout:   "ok",
@@ -88,7 +91,10 @@ func TestClientRunUsesDefaultTimeout(t *testing.T) {
 	client := NewClientWithDeps(
 		&clientFakeRunner{
 			t: t,
-			runFn: func(_ context.Context, _ command, opts RunOptions) (Result, error) {
+			runFn: func(ctx context.Context, _ command, opts RunOptions) (Result, error) {
+				if _, ok := ctx.Deadline(); !ok {
+					t.Fatal("expected deadline to be set")
+				}
 				if opts.Timeout != 2*time.Second {
 					t.Fatalf("unexpected timeout %s", opts.Timeout)
 				}
@@ -115,7 +121,10 @@ func TestClientRunAppliesBaseEnvForCustomRunner(t *testing.T) {
 	client := NewClientWithDeps(
 		&clientFakeRunner{
 			t: t,
-			runFn: func(_ context.Context, _ command, opts RunOptions) (Result, error) {
+			runFn: func(ctx context.Context, _ command, opts RunOptions) (Result, error) {
+				if _, ok := ctx.Deadline(); !ok {
+					t.Fatal("expected deadline to be set")
+				}
 				assertEnvContains(t, opts.Env, "PATH", "/usr/bin")
 				assertEnvContains(t, opts.Env, "HOME", "/override/home")
 				return Result{}, nil
@@ -143,7 +152,10 @@ func TestClientRunUsesExplicitTimeoutOverride(t *testing.T) {
 	client := NewClientWithDeps(
 		&clientFakeRunner{
 			t: t,
-			runFn: func(_ context.Context, _ command, opts RunOptions) (Result, error) {
+			runFn: func(ctx context.Context, _ command, opts RunOptions) (Result, error) {
+				if _, ok := ctx.Deadline(); !ok {
+					t.Fatal("expected deadline to be set")
+				}
 				if opts.Timeout != time.Second {
 					t.Fatalf("unexpected timeout %s", opts.Timeout)
 				}
@@ -172,11 +184,9 @@ func TestClientRunClassifiesTimeout(t *testing.T) {
 	client := NewClientWithDeps(
 		&clientFakeRunner{
 			t: t,
-			runFn: func(context.Context, command, RunOptions) (Result, error) {
-				return Result{}, &execx.TimeoutError{
-					Timeout: 10 * time.Millisecond,
-					Err:     context.DeadlineExceeded,
-				}
+			runFn: func(ctx context.Context, _ command, _ RunOptions) (Result, error) {
+				<-ctx.Done()
+				return Result{}, ctx.Err()
 			},
 		},
 		staticEnvSource{
