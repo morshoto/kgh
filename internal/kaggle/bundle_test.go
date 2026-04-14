@@ -27,6 +27,7 @@ func TestStageKernelBundle(t *testing.T) {
 	exec := spec.ExecutionSpec{
 		Notebook:  sourceNotebook,
 		KernelID:  "yourname/exp142",
+		KernelRef: "yourname/exp142",
 		Resources: config.Resources{GPU: true, Internet: true, Private: false},
 		Sources: config.Sources{
 			CompetitionSources: []string{"playground-series-s6e2"},
@@ -58,7 +59,7 @@ func TestStageKernelBundle(t *testing.T) {
 	if bundle.MetadataPath != filepath.Join(bundle.WorkDir, metadataFilename) {
 		t.Fatalf("unexpected metadata path %q", bundle.MetadataPath)
 	}
-	if bundle.Execution.Notebook != exec.Notebook || bundle.Execution.KernelID != exec.KernelID {
+	if bundle.Execution.Notebook != exec.Notebook || bundle.Execution.KernelRef != exec.KernelRef {
 		t.Fatalf("unexpected execution spec %+v", bundle.Execution)
 	}
 

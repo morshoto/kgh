@@ -49,6 +49,9 @@ func TestResolveUsesTargetDefaults(t *testing.T) {
 	if got.KernelID != "yourname/exp142" {
 		t.Fatalf("unexpected kernel id %q", got.KernelID)
 	}
+	if got.KernelRef != "yourname/exp142" {
+		t.Fatalf("unexpected kernel ref %q", got.KernelRef)
+	}
 	if got.Resources.GPU != true || got.Resources.Internet != false || got.Resources.Private != true {
 		t.Fatalf("unexpected resources: %+v", got.Resources)
 	}
@@ -113,5 +116,27 @@ func TestResolveUnknownTarget(t *testing.T) {
 	}
 	if got := err.Error(); !strings.Contains(got, `unknown target "missing"`) {
 		t.Fatalf("expected unknown target error, got %q", got)
+	}
+}
+
+func TestResolveInvalidKernelIdentity(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Config{
+		Targets: map[string]config.Target{
+			"exp142": {
+				Notebook:    "notebooks/exp142.ipynb",
+				KernelID:    "exp142",
+				Competition: "playground-series-s6e2",
+			},
+		},
+	}
+
+	_, err := Resolve(cfg, parser.Trigger{Target: "exp142"})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if got := err.Error(); !strings.Contains(got, "kernel identity") {
+		t.Fatalf("expected kernel identity error, got %q", got)
 	}
 }

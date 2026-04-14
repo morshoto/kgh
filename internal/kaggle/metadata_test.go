@@ -14,6 +14,7 @@ func TestBuildMetadata(t *testing.T) {
 	exec := spec.ExecutionSpec{
 		Notebook:  "notebooks/exp142.ipynb",
 		KernelID:  "yourname/exp142",
+		KernelRef: "yourname/exp142",
 		Resources: config.Resources{GPU: true, Internet: false, Private: true},
 		Sources:   config.Sources{CompetitionSources: []string{"playground-series-s6e2"}, DatasetSources: []string{"yourname/feature-pack-v3"}},
 	}
@@ -60,8 +61,9 @@ func TestBuildMetadataDeterministic(t *testing.T) {
 	t.Parallel()
 
 	exec := spec.ExecutionSpec{
-		Notebook: "notebooks/exp142.ipynb",
-		KernelID: "yourname/exp142",
+		Notebook:  "notebooks/exp142.ipynb",
+		KernelID:  "yourname/exp142",
+		KernelRef: "yourname/exp142",
 		Sources: config.Sources{
 			CompetitionSources: []string{"b", "a"},
 			DatasetSources:     []string{"x", "y"},

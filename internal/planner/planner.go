@@ -15,8 +15,13 @@ func Resolve(cfg config.Config, trigger parser.Trigger) (spec.ExecutionSpec, err
 		return spec.ExecutionSpec{}, fmt.Errorf("unknown target %q", trigger.Target)
 	}
 
-	return spec.NewExecutionSpec(trigger.Target, target, spec.RuntimeOverrides{
+	exec, err := spec.NewExecutionSpec(trigger.Target, target, spec.RuntimeOverrides{
 		GPU:      trigger.GPU,
 		Internet: trigger.Internet,
-	}), nil
+	})
+	if err != nil {
+		return spec.ExecutionSpec{}, fmt.Errorf("resolve target %q: %w", trigger.Target, err)
+	}
+
+	return exec, nil
 }
