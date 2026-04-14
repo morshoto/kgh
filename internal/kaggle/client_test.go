@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shotomorisk/kgh/internal/execx"
 )
 
 func TestClientRunSuccess(t *testing.T) {
@@ -15,23 +17,26 @@ func TestClientRunSuccess(t *testing.T) {
 
 	runner := &clientFakeRunner{
 		t: t,
-		runFn: func(ctx context.Context, cmd command) (Result, error) {
+		runFn: func(ctx context.Context, cmd command, opts RunOptions) (Result, error) {
 			if cmd.Path != "/usr/local/bin/kaggle" {
 				t.Fatalf("unexpected path %q", cmd.Path)
 			}
-			if !equalStrings(cmd.Args, []string{"/usr/local/bin/kaggle", "kernels", "status"}) {
+			if !equalStrings(cmd.Args, []string{"kernels", "status"}) {
 				t.Fatalf("unexpected args %#v", cmd.Args)
 			}
-			if cmd.Dir != "/repo" {
-				t.Fatalf("unexpected dir %q", cmd.Dir)
+			if opts.Dir != "/repo" {
+				t.Fatalf("unexpected dir %q", opts.Dir)
 			}
-			assertEnvContains(t, cmd.Env, "PATH", "/usr/bin")
-			assertEnvContains(t, cmd.Env, "HOME", "/tmp/home")
-			assertEnvMissing(t, cmd.Env, envKaggleAPIToken)
-			assertEnvMissing(t, cmd.Env, envKaggleUsername)
-			assertEnvMissing(t, cmd.Env, envKaggleKey)
-			if dir := envValue(cmd.Env, envKaggleConfigDir); dir == "" {
-				t.Fatalf("expected %s to be set in %#v", envKaggleConfigDir, cmd.Env)
+			if opts.Timeout != 30*time.Second {
+				t.Fatalf("unexpected timeout %s", opts.Timeout)
+			}
+			assertEnvContains(t, opts.Env, "PATH", "/usr/bin")
+			assertEnvContains(t, opts.Env, "HOME", "/tmp/home")
+			assertEnvMissing(t, opts.Env, envKaggleAPIToken)
+			assertEnvMissing(t, opts.Env, envKaggleUsername)
+			assertEnvMissing(t, opts.Env, envKaggleKey)
+			if dir := envValue(opts.Env, envKaggleConfigDir); dir == "" {
+				t.Fatalf("expected %s to be set in %#v", envKaggleConfigDir, opts.Env)
 			} else {
 				payload, err := os.ReadFile(filepath.Join(dir, kaggleJSONFilename))
 				if err != nil {
@@ -42,7 +47,7 @@ func TestClientRunSuccess(t *testing.T) {
 				}
 			}
 			if _, ok := ctx.Deadline(); !ok {
-				t.Fatal("expected context deadline to be set")
+				t.Fatal("expected deadline to be set")
 			}
 			return Result{
 				Stdout:   "ok",
@@ -64,12 +69,7 @@ func TestClientRunSuccess(t *testing.T) {
 			}
 			return "/usr/local/bin/kaggle", nil
 		},
-		func() []string {
-			return []string{
-				"PATH=/usr/bin",
-				"HOME=/base/home",
-			}
-		},
+		func() []string { return []string{"PATH=/usr/bin", "HOME=/base/home"} },
 		30*time.Second,
 	)
 
@@ -91,14 +91,12 @@ func TestClientRunUsesDefaultTimeout(t *testing.T) {
 	client := NewClientWithDeps(
 		&clientFakeRunner{
 			t: t,
-			runFn: func(ctx context.Context, cmd command) (Result, error) {
-				deadline, ok := ctx.Deadline()
-				if !ok {
+			runFn: func(ctx context.Context, _ command, opts RunOptions) (Result, error) {
+				if _, ok := ctx.Deadline(); !ok {
 					t.Fatal("expected deadline to be set")
 				}
-				remaining := time.Until(deadline)
-				if remaining <= 0 || remaining > 5*time.Second {
-					t.Fatalf("unexpected deadline window %s", remaining)
+				if opts.Timeout != 2*time.Second {
+					t.Fatalf("unexpected timeout %s", opts.Timeout)
 				}
 				return Result{}, nil
 			},
@@ -117,20 +115,49 @@ func TestClientRunUsesDefaultTimeout(t *testing.T) {
 	}
 }
 
+func TestClientRunAppliesBaseEnvForCustomRunner(t *testing.T) {
+	t.Parallel()
+
+	client := NewClientWithDeps(
+		&clientFakeRunner{
+			t: t,
+			runFn: func(ctx context.Context, _ command, opts RunOptions) (Result, error) {
+				if _, ok := ctx.Deadline(); !ok {
+					t.Fatal("expected deadline to be set")
+				}
+				assertEnvContains(t, opts.Env, "PATH", "/usr/bin")
+				assertEnvContains(t, opts.Env, "HOME", "/override/home")
+				return Result{}, nil
+			},
+		},
+		staticEnvSource{
+			envKaggleUsername: "alice",
+			envKaggleKey:      "secret-key",
+		},
+		func(string) (string, error) { return "/usr/local/bin/kaggle", nil },
+		func() []string { return []string{"PATH=/usr/bin", "HOME=/base/home"} },
+		time.Second,
+	)
+
+	if _, err := client.Run(context.Background(), []string{"kernels", "status"}, RunOptions{
+		Env: []string{"HOME=/override/home"},
+	}); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
 func TestClientRunUsesExplicitTimeoutOverride(t *testing.T) {
 	t.Parallel()
 
 	client := NewClientWithDeps(
 		&clientFakeRunner{
 			t: t,
-			runFn: func(ctx context.Context, cmd command) (Result, error) {
-				deadline, ok := ctx.Deadline()
-				if !ok {
+			runFn: func(ctx context.Context, _ command, opts RunOptions) (Result, error) {
+				if _, ok := ctx.Deadline(); !ok {
 					t.Fatal("expected deadline to be set")
 				}
-				remaining := time.Until(deadline)
-				if remaining <= 0 || remaining > 1500*time.Millisecond {
-					t.Fatalf("unexpected deadline window %s", remaining)
+				if opts.Timeout != time.Second {
+					t.Fatalf("unexpected timeout %s", opts.Timeout)
 				}
 				return Result{}, nil
 			},
@@ -157,7 +184,7 @@ func TestClientRunClassifiesTimeout(t *testing.T) {
 	client := NewClientWithDeps(
 		&clientFakeRunner{
 			t: t,
-			runFn: func(ctx context.Context, cmd command) (Result, error) {
+			runFn: func(ctx context.Context, _ command, _ RunOptions) (Result, error) {
 				<-ctx.Done()
 				return Result{}, ctx.Err()
 			},
@@ -191,12 +218,16 @@ func TestClientRunClassifiesCommandFailure(t *testing.T) {
 	client := NewClientWithDeps(
 		&clientFakeRunner{
 			t: t,
-			runFn: func(context.Context, command) (Result, error) {
-				return Result{
+			runFn: func(context.Context, command, RunOptions) (Result, error) {
+				result := Result{
 					Stdout:   "partial output",
 					Stderr:   "bad things happened",
 					ExitCode: 2,
-				}, errors.New("exit status 2")
+				}
+				return result, &execx.ExitError{
+					Result: result,
+					Err:    errors.New("exit status 2"),
+				}
 			},
 		},
 		staticEnvSource{
@@ -260,16 +291,18 @@ func TestClientRunSupportsTokenAuth(t *testing.T) {
 
 	runner := &clientFakeRunner{
 		t: t,
-		runFn: func(ctx context.Context, cmd command) (Result, error) {
-			if !equalStrings(cmd.Args, []string{"/usr/local/bin/kaggle", "kernels", "status"}) {
+		runFn: func(_ context.Context, cmd command, opts RunOptions) (Result, error) {
+			if !equalStrings(cmd.Args, []string{"kernels", "status"}) {
 				t.Fatalf("unexpected args %#v", cmd.Args)
 			}
-			assertEnvContains(t, cmd.Env, "PATH", "/usr/bin")
-			assertEnvMissing(t, cmd.Env, envKaggleAPIToken)
-			assertEnvMissing(t, cmd.Env, envKaggleUsername)
-			assertEnvMissing(t, cmd.Env, envKaggleKey)
-			if dir := envValue(cmd.Env, envKaggleConfigDir); dir == "" {
-				t.Fatalf("expected %s to be set in %#v", envKaggleConfigDir, cmd.Env)
+			if opts.Timeout != time.Second {
+				t.Fatalf("unexpected timeout %s", opts.Timeout)
+			}
+			assertEnvMissing(t, opts.Env, envKaggleAPIToken)
+			assertEnvMissing(t, opts.Env, envKaggleUsername)
+			assertEnvMissing(t, opts.Env, envKaggleKey)
+			if dir := envValue(opts.Env, envKaggleConfigDir); dir == "" {
+				t.Fatalf("expected %s to be set in %#v", envKaggleConfigDir, opts.Env)
 			} else {
 				token, err := os.ReadFile(filepath.Join(dir, accessTokenFilename))
 				if err != nil {
@@ -278,9 +311,6 @@ func TestClientRunSupportsTokenAuth(t *testing.T) {
 				if string(token) != "secret-token" {
 					t.Fatalf("unexpected token file content %q", string(token))
 				}
-			}
-			if _, ok := ctx.Deadline(); !ok {
-				t.Fatal("expected context deadline to be set")
 			}
 			return Result{ExitCode: 0}, nil
 		},
@@ -303,14 +333,14 @@ func TestClientRunSupportsTokenAuth(t *testing.T) {
 
 type clientFakeRunner struct {
 	t     *testing.T
-	runFn func(context.Context, command) (Result, error)
+	runFn func(context.Context, command, RunOptions) (Result, error)
 }
 
-func (f *clientFakeRunner) Run(ctx context.Context, cmd command) (Result, error) {
+func (f *clientFakeRunner) Run(ctx context.Context, cmd command, opts RunOptions) (Result, error) {
 	if f.runFn == nil {
 		f.t.Fatal("runFn must be set")
 	}
-	return f.runFn(ctx, cmd)
+	return f.runFn(ctx, cmd, opts)
 }
 
 func envValue(env []string, key string) string {

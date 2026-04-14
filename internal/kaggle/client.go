@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
+
+	"github.com/shotomorisk/kgh/internal/execx"
 )
 
 const defaultTimeout = 30 * time.Second
@@ -65,22 +67,22 @@ func (e *TimeoutError) Unwrap() error { return e.Err }
 
 // NewClient constructs a Kaggle CLI adapter with production dependencies.
 func NewClient() *Client {
-	return NewClientWithDeps(execRunner{}, osEnvSource{}, exec.LookPath, currentEnv, defaultTimeout)
+	return NewClientWithDeps(nil, osEnvSource{}, exec.LookPath, currentEnv, defaultTimeout)
 }
 
 // NewClientWithDeps constructs a Kaggle CLI adapter with injected dependencies for tests.
 func NewClientWithDeps(runner Runner, env EnvSource, lookPath LookPathFunc, baseEnv func() []string, timeout time.Duration) *Client {
+	if baseEnv == nil {
+		baseEnv = currentEnv
+	}
 	if runner == nil {
-		runner = execRunner{}
+		runner = execx.NewRunnerWithBaseEnv(func() []string { return nil })
 	}
 	if env == nil {
 		env = osEnvSource{}
 	}
 	if lookPath == nil {
 		lookPath = exec.LookPath
-	}
-	if baseEnv == nil {
-		baseEnv = currentEnv
 	}
 	if timeout <= 0 {
 		timeout = defaultTimeout
@@ -124,15 +126,27 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	command := buildCommand(binaryPath, args, c.baseEnv(), RunOptions{
+	command := command{
+		Path: binaryPath,
+		Args: append([]string(nil), args...),
+	}
+
+	result, err := c.runner.Run(runCtx, command, RunOptions{
 		Dir:     opts.Dir,
-		Env:     append(runtimeSetup.Env, opts.Env...),
+		Env:     execx.MergeEnv(c.baseEnv(), append(runtimeSetup.Env, opts.Env...)),
 		Timeout: timeout,
 	})
-
-	result, err := c.runner.Run(runCtx, command)
 	if err == nil {
 		return result, nil
+	}
+
+	var timeoutErr *execx.TimeoutError
+	if errors.As(err, &timeoutErr) {
+		return result, &TimeoutError{
+			Args:    append([]string(nil), args...),
+			Timeout: timeout,
+			Err:     err,
+		}
 	}
 
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
@@ -143,7 +157,8 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 		}
 	}
 
-	if result.ExitCode != 0 {
+	var exitErr *execx.ExitError
+	if errors.As(err, &exitErr) {
 		return result, &CommandError{
 			Args:     append([]string(nil), args...),
 			ExitCode: result.ExitCode,
