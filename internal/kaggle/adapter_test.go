@@ -34,7 +34,11 @@ func TestCLIAdapterPushKernel(t *testing.T) {
 				t.Fatalf("unexpected args %#v", args)
 			}
 			assertZeroRunOptions(t, opts)
-			return Result{}, nil
+			return Result{
+				Stdout:   "Kernel pushed successfully\n",
+				Stderr:   "",
+				ExitCode: 0,
+			}, nil
 		},
 	}
 
@@ -44,8 +48,11 @@ func TestCLIAdapterPushKernel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if resp.KernelRef != "" {
-		t.Fatalf("expected empty kernel ref, got %q", resp.KernelRef)
+	if resp.Output.Stdout != "Kernel pushed successfully\n" {
+		t.Fatalf("unexpected stdout %q", resp.Output.Stdout)
+	}
+	if resp.Output.ExitCode != 0 {
+		t.Fatalf("unexpected exit code %d", resp.Output.ExitCode)
 	}
 }
 
@@ -448,6 +455,47 @@ func TestCLIAdapterNormalizesMissingCredentials(t *testing.T) {
 	}
 	if adapterErr.Category != ErrorCategoryMissingCredentials {
 		t.Fatalf("unexpected category %q", adapterErr.Category)
+	}
+}
+
+func TestCLIAdapterNormalizesPushKernelCommandFailure(t *testing.T) {
+	t.Parallel()
+
+	fake := &adapterFakeClient{
+		t: t,
+		runFn: func(_ context.Context, _ []string, _ RunOptions) (Result, error) {
+			return Result{
+					Stdout:   "uploading bundle\n",
+					Stderr:   "403 Forbidden: you must accept the competition rules",
+					ExitCode: 1,
+				}, &CommandError{
+					ExitCode: 1,
+					Stdout:   "uploading bundle\n",
+					Stderr:   "403 Forbidden: you must accept the competition rules",
+					Err:      errors.New("exit status 1"),
+				}
+		},
+	}
+
+	_, err := (&CLIAdapter{client: fake}).PushKernel(context.Background(), PushKernelRequest{
+		WorkDir: "/tmp/work",
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+
+	var adapterErr *AdapterError
+	if !errors.As(err, &adapterErr) {
+		t.Fatalf("expected AdapterError, got %T", err)
+	}
+	if adapterErr.Category != ErrorCategoryPermissionDenied {
+		t.Fatalf("unexpected category %q", adapterErr.Category)
+	}
+	if adapterErr.Stdout != "uploading bundle\n" {
+		t.Fatalf("unexpected stdout %q", adapterErr.Stdout)
+	}
+	if adapterErr.Stderr == "" {
+		t.Fatal("expected stderr to be preserved")
 	}
 }
 

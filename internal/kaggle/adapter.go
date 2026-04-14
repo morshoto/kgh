@@ -27,7 +27,7 @@ type PushKernelRequest struct {
 }
 
 type PushKernelResponse struct {
-	KernelRef string
+	Output Result
 }
 
 type KernelStatusRequest struct {
@@ -103,10 +103,11 @@ func (a *CLIAdapter) PushKernel(ctx context.Context, req PushKernelRequest) (Pus
 	if err != nil {
 		return PushKernelResponse{}, err
 	}
-	if _, err := a.run(ctx, "push kernel", args, req.Debug); err != nil {
+	result, err := a.run(ctx, "push kernel", args, req.Debug)
+	if err != nil {
 		return PushKernelResponse{}, err
 	}
-	return PushKernelResponse{}, nil
+	return PushKernelResponse{Output: result}, nil
 }
 
 func (a *CLIAdapter) KernelStatus(ctx context.Context, req KernelStatusRequest) (KernelStatusResponse, error) {
