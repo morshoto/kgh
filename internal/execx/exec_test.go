@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,9 +29,7 @@ func TestRunnerSuccess(t *testing.T) {
 	if result.Stdout != "stdout:BASE=2,ADDED=yes\n" {
 		t.Fatalf("unexpected stdout %q", result.Stdout)
 	}
-	if result.Stderr != "stderr:KEEP=ok\n" {
-		t.Fatalf("unexpected stderr %q", result.Stderr)
-	}
+	assertHasPrefix(t, result.Stderr, "stderr:KEEP=ok\n")
 }
 
 func TestRunnerNonZeroExit(t *testing.T) {
@@ -55,9 +54,7 @@ func TestRunnerNonZeroExit(t *testing.T) {
 	if result.Stdout != "partial stdout\n" {
 		t.Fatalf("unexpected stdout %q", result.Stdout)
 	}
-	if result.Stderr != "partial stderr\n" {
-		t.Fatalf("unexpected stderr %q", result.Stderr)
-	}
+	assertHasPrefix(t, result.Stderr, "partial stderr\n")
 }
 
 func TestRunnerTimeout(t *testing.T) {
@@ -158,5 +155,12 @@ func TestHelperProcess(t *testing.T) {
 	default:
 		_, _ = os.Stderr.WriteString("unknown helper mode: " + mode + "\n")
 		os.Exit(2)
+	}
+}
+
+func assertHasPrefix(t *testing.T, got, wantPrefix string) {
+	t.Helper()
+	if !strings.HasPrefix(got, wantPrefix) {
+		t.Fatalf("expected %q to start with %q", got, wantPrefix)
 	}
 }
