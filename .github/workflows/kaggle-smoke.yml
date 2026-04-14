@@ -1,0 +1,51 @@
+name: Kaggle Smoke
+
+on:
+    workflow_dispatch:
+        inputs:
+            competition:
+                description: Kaggle competition slug to probe with a read-only submission listing
+                required: true
+                type: string
+
+permissions:
+    contents: read
+
+jobs:
+    smoke:
+        name: Smoke
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version-file: go.mod
+                  cache: false
+
+            - name: Install Kaggle CLI
+              shell: bash
+              run: python3 -m pip install --upgrade kaggle
+
+            - name: Run Kaggle smoke test
+              shell: bash
+              env:
+                  KGH_KAGGLE_SMOKE: "1"
+                  KGH_KAGGLE_SMOKE_COMPETITION: ${{ inputs.competition }}
+                  KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+                  KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+                  KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+              run: |
+                  set -euo pipefail
+                  if [[ -z "${KGH_KAGGLE_SMOKE_COMPETITION}" ]]; then
+                    echo "KGH_KAGGLE_SMOKE_COMPETITION is required" >&2
+                    exit 1
+                  fi
+                  if [[ -z "${KAGGLE_API_TOKEN}" && ( -z "${KAGGLE_USERNAME}" || -z "${KAGGLE_KEY}" ) ]]; then
+                    echo "Set either KAGGLE_API_TOKEN or both KAGGLE_USERNAME and KAGGLE_KEY" >&2
+                    exit 1
+                  fi
+                  go test -tags smoke ./internal/kaggle -run '^TestSmokeKaggleAdapterLive$' -count=1

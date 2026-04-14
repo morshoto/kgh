@@ -261,9 +261,9 @@ func TestCLIAdapterNormalizesOperationFailures(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		run         func(*CLIAdapter) error
-		runErr      error
+		name         string
+		run          func(*CLIAdapter) error
+		runErr       error
 		wantCategory ErrorCategory
 	}{
 		{
@@ -272,7 +272,7 @@ func TestCLIAdapterNormalizesOperationFailures(t *testing.T) {
 				_, err := adapter.PushKernel(context.Background(), PushKernelRequest{WorkDir: "/tmp/work"})
 				return err
 			},
-			runErr: &MissingCredentialsError{Missing: []string{envKaggleUsername}},
+			runErr:       &MissingCredentialsError{Missing: []string{envKaggleUsername}},
 			wantCategory: ErrorCategoryMissingCredentials,
 		},
 		{
