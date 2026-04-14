@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
+
+	"github.com/shotomorisk/kgh/internal/execx"
 )
 
 const defaultTimeout = 30 * time.Second
@@ -15,7 +17,6 @@ type Client struct {
 	runner         Runner
 	env            EnvSource
 	lookPath       LookPathFunc
-	baseEnv        func() []string
 	defaultTimeout time.Duration
 }
 
@@ -65,13 +66,13 @@ func (e *TimeoutError) Unwrap() error { return e.Err }
 
 // NewClient constructs a Kaggle CLI adapter with production dependencies.
 func NewClient() *Client {
-	return NewClientWithDeps(execRunner{}, osEnvSource{}, exec.LookPath, currentEnv, defaultTimeout)
+	return NewClientWithDeps(nil, osEnvSource{}, exec.LookPath, currentEnv, defaultTimeout)
 }
 
 // NewClientWithDeps constructs a Kaggle CLI adapter with injected dependencies for tests.
 func NewClientWithDeps(runner Runner, env EnvSource, lookPath LookPathFunc, baseEnv func() []string, timeout time.Duration) *Client {
 	if runner == nil {
-		runner = execRunner{}
+		runner = execx.NewRunnerWithBaseEnv(baseEnv)
 	}
 	if env == nil {
 		env = osEnvSource{}
@@ -90,7 +91,6 @@ func NewClientWithDeps(runner Runner, env EnvSource, lookPath LookPathFunc, base
 		runner:         runner,
 		env:            env,
 		lookPath:       lookPath,
-		baseEnv:        baseEnv,
 		defaultTimeout: timeout,
 	}
 }
@@ -121,21 +121,22 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 		timeout = c.defaultTimeout
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	command := command{
+		Path: binaryPath,
+		Args: append([]string(nil), args...),
+	}
 
-	command := buildCommand(binaryPath, args, c.baseEnv(), RunOptions{
+	result, err := c.runner.Run(ctx, command, RunOptions{
 		Dir:     opts.Dir,
 		Env:     append(runtimeSetup.Env, opts.Env...),
 		Timeout: timeout,
 	})
-
-	result, err := c.runner.Run(runCtx, command)
 	if err == nil {
 		return result, nil
 	}
 
-	if errors.Is(runCtx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+	var timeoutErr *execx.TimeoutError
+	if errors.As(err, &timeoutErr) {
 		return result, &TimeoutError{
 			Args:    append([]string(nil), args...),
 			Timeout: timeout,
@@ -143,7 +144,8 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 		}
 	}
 
-	if result.ExitCode != 0 {
+	var exitErr *execx.ExitError
+	if errors.As(err, &exitErr) {
 		return result, &CommandError{
 			Args:     append([]string(nil), args...),
 			ExitCode: result.ExitCode,
