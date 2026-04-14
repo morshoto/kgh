@@ -22,7 +22,7 @@ body:
           required: true
 
     - type: textarea
-      id: links and screenshots
+      id: links_and_screenshots
       attributes:
           label: 'Related Links'
           description: 'Links to related issues, PRs, or documentation'
