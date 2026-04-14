@@ -3,6 +3,7 @@ package kaggle
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -35,7 +36,7 @@ func TestCLIAdapterPushKernel(t *testing.T) {
 			}
 			assertZeroRunOptions(t, opts)
 			return Result{
-				Stdout:   "Kernel pushed successfully\n",
+				Stdout:   "Kernel URL: https://www.kaggle.com/code/alice/exp142\nKernel pushed successfully\n",
 				Stderr:   "",
 				ExitCode: 0,
 			}, nil
@@ -48,11 +49,39 @@ func TestCLIAdapterPushKernel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if resp.Output.Stdout != "Kernel pushed successfully\n" {
+	if resp.KernelRef != "alice/exp142" {
+		t.Fatalf("unexpected kernel ref %q", resp.KernelRef)
+	}
+	if resp.Output.Stdout != "Kernel URL: https://www.kaggle.com/code/alice/exp142\nKernel pushed successfully\n" {
 		t.Fatalf("unexpected stdout %q", resp.Output.Stdout)
 	}
 	if resp.Output.ExitCode != 0 {
 		t.Fatalf("unexpected exit code %d", resp.Output.ExitCode)
+	}
+}
+
+func TestCLIAdapterPushKernelMissingIdentity(t *testing.T) {
+	t.Parallel()
+
+	fake := &adapterFakeClient{
+		t: t,
+		runFn: func(_ context.Context, args []string, opts RunOptions) (Result, error) {
+			if !equalStrings(args, []string{"kernels", "push", "-p", "/tmp/work tree"}) {
+				t.Fatalf("unexpected args %#v", args)
+			}
+			assertZeroRunOptions(t, opts)
+			return Result{Stdout: "Kernel pushed successfully\n"}, nil
+		},
+	}
+
+	_, err := (&CLIAdapter{client: fake}).PushKernel(context.Background(), PushKernelRequest{
+		WorkDir: "/tmp/work tree",
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if got := err.Error(); !strings.Contains(got, "unexpected CLI output") {
+		t.Fatalf("expected unexpected output error, got %q", got)
 	}
 }
 
@@ -249,6 +278,8 @@ func TestCLIAdapterForwardsDebugFlag(t *testing.T) {
 					switch tt.name {
 					case "kernel status":
 						return Result{Stdout: "status: complete\nmessage: finished\n"}, nil
+					case "push kernel":
+						return Result{Stdout: "Kernel URL: https://www.kaggle.com/code/alice/exp142\nKernel pushed successfully\n"}, nil
 					case "list competition submissions":
 						return Result{Stdout: "file,description,date,status,publicScore\nsubmission.csv,submit from PR #12,2026-04-14T10:00:00Z,complete,0.12345\n"}, nil
 					default:

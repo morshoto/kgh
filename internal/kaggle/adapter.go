@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/shotomorisk/kgh/internal/kernelref"
 )
 
 // Adapter defines workflow-level Kaggle operations without exposing shell details.
@@ -27,7 +29,8 @@ type PushKernelRequest struct {
 }
 
 type PushKernelResponse struct {
-	Output Result
+	KernelRef string
+	Output    Result
 }
 
 type KernelStatusRequest struct {
@@ -107,7 +110,11 @@ func (a *CLIAdapter) PushKernel(ctx context.Context, req PushKernelRequest) (Pus
 	if err != nil {
 		return PushKernelResponse{}, err
 	}
-	return PushKernelResponse{Output: result}, nil
+	kernelRef, err := extractKernelRefFromPushResult(result)
+	if err != nil {
+		return PushKernelResponse{}, err
+	}
+	return PushKernelResponse{KernelRef: kernelRef, Output: result}, nil
 }
 
 func (a *CLIAdapter) KernelStatus(ctx context.Context, req KernelStatusRequest) (KernelStatusResponse, error) {
@@ -465,4 +472,13 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func extractKernelRefFromPushResult(result Result) (string, error) {
+	output := strings.TrimSpace(strings.Join([]string{result.Stdout, result.Stderr}, "\n"))
+	kernelRef, err := kernelref.ExtractFromText(output)
+	if err != nil {
+		return "", unexpectedOutputError("push kernel", result, err.Error())
+	}
+	return kernelRef, nil
 }
