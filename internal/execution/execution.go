@@ -59,6 +59,7 @@ type PollResult struct {
 	StartedAt  time.Time                      `json:"started_at"`
 	FinishedAt time.Time                      `json:"finished_at"`
 	Elapsed    time.Duration                  `json:"elapsed"`
+	Raw        kaggle.KernelStatusRawStatus   `json:"raw,omitempty"`
 }
 
 type Adapter interface {
@@ -119,7 +120,75 @@ func (r *Runner) Execute(ctx context.Context, req Request) (Result, error) {
 		Execution:  execSpec,
 	}
 	if !req.DryRun {
-		return Result{}, fmt.Errorf("live execution is not implemented yet")
+		return r.executeLive(ctx, execSpec, report)
+	}
+
+	return report, nil
+}
+
+func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, report Result) (Result, error) {
+	if r.adapter == nil {
+		return Result{}, fmt.Errorf("live execution requires a Kaggle adapter")
+	}
+
+	bundle, err := kaggle.StageKernelBundle(execSpec)
+	if err != nil {
+		return Result{}, fmt.Errorf("stage kaggle bundle: %w", err)
+	}
+	defer func() {
+		if bundle.Cleanup != nil {
+			_ = bundle.Cleanup()
+		}
+	}()
+
+	report.Mode = ModeLive
+	report.DryRun = false
+	report.Bundle = &BundleResult{
+		WorkDir:      bundle.WorkDir,
+		NotebookPath: bundle.NotebookPath,
+		MetadataPath: bundle.MetadataPath,
+	}
+
+	pushResp, err := r.adapter.PushKernel(ctx, kaggle.PushKernelRequest{
+		WorkDir: bundle.WorkDir,
+	})
+	if err != nil {
+		return report, fmt.Errorf("push kaggle kernel: %w", err)
+	}
+	report.Push = &PushResult{
+		KernelRef: pushResp.KernelRef,
+		ExitCode:  pushResp.Output.ExitCode,
+		Stdout:    pushResp.Output.Stdout,
+		Stderr:    pushResp.Output.Stderr,
+	}
+
+	pollTimeout := r.pollTimeout
+	if pollTimeout <= 0 {
+		pollTimeout = 30 * time.Minute
+	}
+	pollInterval := r.pollInterval
+	if pollInterval <= 0 {
+		pollInterval = 5 * time.Second
+	}
+
+	pollResp, err := r.adapter.PollKernelStatus(ctx, kaggle.KernelPollRequest{
+		KernelRef: pushResp.KernelRef,
+		Interval:  pollInterval,
+		Timeout:   pollTimeout,
+	})
+	if err != nil {
+		return report, fmt.Errorf("poll kaggle kernel: %w", err)
+	}
+	report.Poll = &PollResult{
+		KernelRef:  pollResp.KernelRef,
+		Status:     pollResp.Status,
+		Message:    pollResp.Message,
+		Attempts:   pollResp.Attempts,
+		Terminal:   pollResp.Terminal,
+		StartedAt:  pollResp.StartedAt,
+		FinishedAt: pollResp.FinishedAt,
+		Elapsed:    pollResp.Elapsed,
+		Raw:        pollResp.KernelStatusResponse.Raw,
 	}
 
 	return report, nil
