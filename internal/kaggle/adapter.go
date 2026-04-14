@@ -18,6 +18,7 @@ import (
 type Adapter interface {
 	PushKernel(context.Context, PushKernelRequest) (PushKernelResponse, error)
 	KernelStatus(context.Context, KernelStatusRequest) (KernelStatusResponse, error)
+	PollKernelStatus(context.Context, KernelPollRequest) (KernelPollResult, error)
 	DownloadKernelOutput(context.Context, DownloadKernelOutputRequest) (DownloadKernelOutputResponse, error)
 	SubmitCompetition(context.Context, CompetitionSubmitRequest) (CompetitionSubmitResponse, error)
 	ListCompetitionSubmissions(context.Context, CompetitionSubmissionsRequest) (CompetitionSubmissionsResponse, error)
@@ -103,7 +104,8 @@ type clientRunner interface {
 
 // CLIAdapter maps typed adapter operations to Kaggle CLI invocations.
 type CLIAdapter struct {
-	client clientRunner
+	client    clientRunner
+	newPoller func(KernelStatusQuerier) *KernelPoller
 }
 
 // NewAdapter constructs a workflow-level adapter backed by the Kaggle CLI client.
@@ -141,6 +143,11 @@ func (a *CLIAdapter) KernelStatus(ctx context.Context, req KernelStatusRequest) 
 		return KernelStatusResponse{}, err
 	}
 	return resp, nil
+}
+
+func (a *CLIAdapter) PollKernelStatus(ctx context.Context, req KernelPollRequest) (KernelPollResult, error) {
+	poller := a.kernelPoller()
+	return poller.Poll(ctx, req)
 }
 
 func (a *CLIAdapter) DownloadKernelOutput(ctx context.Context, req DownloadKernelOutputRequest) (DownloadKernelOutputResponse, error) {
@@ -195,6 +202,13 @@ func (a *CLIAdapter) run(ctx context.Context, operation string, args []string, d
 	return result, nil
 }
 
+func (a *CLIAdapter) kernelPoller() *KernelPoller {
+	if a != nil && a.newPoller != nil {
+		return a.newPoller(a)
+	}
+	return NewKernelPoller(a)
+}
+
 // StubAdapter is a compile-ready placeholder implementation for tests and wiring.
 type StubAdapter struct{}
 
@@ -204,6 +218,10 @@ func (StubAdapter) PushKernel(context.Context, PushKernelRequest) (PushKernelRes
 
 func (StubAdapter) KernelStatus(context.Context, KernelStatusRequest) (KernelStatusResponse, error) {
 	return KernelStatusResponse{}, notImplemented("kernel status")
+}
+
+func (StubAdapter) PollKernelStatus(context.Context, KernelPollRequest) (KernelPollResult, error) {
+	return KernelPollResult{}, notImplemented("poll kernel status")
 }
 
 func (StubAdapter) DownloadKernelOutput(context.Context, DownloadKernelOutputRequest) (DownloadKernelOutputResponse, error) {

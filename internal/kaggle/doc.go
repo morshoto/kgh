@@ -5,6 +5,6 @@
 //
 // The package remains intentionally thin. It resolves Kaggle credentials,
 // stages local kernel bundles, delegates external command execution to
-// internal/execx, and returns typed errors that higher layers can surface
-// cleanly.
+// internal/execx, polls kernel status until a terminal state is reached, and
+// returns typed errors that higher layers can surface cleanly.
 package kaggle
