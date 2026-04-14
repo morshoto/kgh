@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/shotomorisk/kgh/internal/kernelref"
 	"github.com/shotomorisk/kgh/internal/spec"
 )
 
@@ -30,9 +31,18 @@ type Metadata struct {
 
 // BuildMetadata converts a resolved execution spec into a deterministic Kaggle metadata payload.
 func BuildMetadata(exec spec.ExecutionSpec) Metadata {
+	kernelID := exec.KernelRef
+	if kernelID == "" {
+		if normalized, err := kernelref.Normalize(exec.KernelID); err == nil {
+			kernelID = normalized
+		} else {
+			kernelID = strings.TrimSpace(exec.KernelID)
+		}
+	}
+
 	return Metadata{
 		Title:              notebookTitle(exec.Notebook),
-		ID:                 exec.KernelID,
+		ID:                 kernelID,
 		CodeFile:           filepath.Base(exec.Notebook),
 		Language:           defaultLanguage,
 		KernelType:         defaultKernelType,

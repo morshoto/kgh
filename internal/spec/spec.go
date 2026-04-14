@@ -1,6 +1,9 @@
 package spec
 
-import "github.com/shotomorisk/kgh/internal/config"
+import (
+	"github.com/shotomorisk/kgh/internal/config"
+	"github.com/shotomorisk/kgh/internal/kernelref"
+)
 
 // RuntimeOverrides contains the subset of trigger-level fields that can override a target.
 type RuntimeOverrides struct {
@@ -13,6 +16,7 @@ type ExecutionSpec struct {
 	TargetName  string           `json:"target_name" yaml:"target_name"`
 	Notebook    string           `json:"notebook" yaml:"notebook"`
 	KernelID    string           `json:"kernel_id" yaml:"kernel_id"`
+	KernelRef   string           `json:"kernel_ref" yaml:"kernel_ref"`
 	Competition string           `json:"competition" yaml:"competition"`
 	Submit      bool             `json:"submit" yaml:"submit"`
 	Resources   config.Resources `json:"resources" yaml:"resources"`
@@ -22,7 +26,7 @@ type ExecutionSpec struct {
 }
 
 // NewExecutionSpec merges a target definition with supported runtime overrides.
-func NewExecutionSpec(name string, target config.Target, overrides RuntimeOverrides) ExecutionSpec {
+func NewExecutionSpec(name string, target config.Target, overrides RuntimeOverrides) (ExecutionSpec, error) {
 	resources := target.Resources
 	if overrides.GPU != nil {
 		resources.GPU = *overrides.GPU
@@ -31,15 +35,21 @@ func NewExecutionSpec(name string, target config.Target, overrides RuntimeOverri
 		resources.Internet = *overrides.Internet
 	}
 
+	kernelRef, err := kernelref.Normalize(target.KernelID)
+	if err != nil {
+		return ExecutionSpec{}, err
+	}
+
 	return ExecutionSpec{
 		TargetName:  name,
 		Notebook:    target.Notebook,
 		KernelID:    target.KernelID,
+		KernelRef:   kernelRef,
 		Competition: target.Competition,
 		Submit:      target.Submit,
 		Resources:   resources,
 		Sources:     target.Sources,
 		Outputs:     target.Outputs,
 		Overrides:   overrides,
-	}
+	}, nil
 }

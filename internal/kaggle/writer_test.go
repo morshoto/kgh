@@ -16,6 +16,7 @@ func TestWriteKernelMetadata(t *testing.T) {
 	exec := spec.ExecutionSpec{
 		Notebook:  "notebooks/exp142.ipynb",
 		KernelID:  "yourname/exp142",
+		KernelRef: "yourname/exp142",
 		Resources: config.Resources{GPU: true, Internet: true, Private: false},
 		Sources:   config.Sources{CompetitionSources: []string{"playground-series-s6e2"}, DatasetSources: []string{"yourname/feature-pack-v3"}},
 	}

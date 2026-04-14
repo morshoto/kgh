@@ -49,6 +49,9 @@ func TestResolveUsesTargetDefaults(t *testing.T) {
 	if got.KernelID != "yourname/exp142" {
 		t.Fatalf("unexpected kernel id %q", got.KernelID)
 	}
+	if got.KernelRef != "yourname/exp142" {
+		t.Fatalf("unexpected kernel ref %q", got.KernelRef)
+	}
 	if got.Resources.GPU != true || got.Resources.Internet != false || got.Resources.Private != true {
 		t.Fatalf("unexpected resources: %+v", got.Resources)
 	}
