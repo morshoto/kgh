@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/shotomorisk/kgh/internal/execx"
 )
@@ -12,7 +13,12 @@ import (
 const kaggleBinary = "kaggle"
 
 // RunOptions configures a Kaggle CLI process execution.
-type RunOptions = execx.Options
+type RunOptions struct {
+	Dir     string
+	Env     []string
+	Timeout time.Duration
+	Debug   bool
+}
 
 // Result captures the observable output from a Kaggle CLI process.
 type Result = execx.Result

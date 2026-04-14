@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/shotomorisk/kgh/internal/execx"
@@ -19,6 +20,7 @@ type Client struct {
 	lookPath       LookPathFunc
 	baseEnv        func() []string
 	defaultTimeout time.Duration
+	logger         operationLogger
 }
 
 type osEnvSource struct{}
@@ -67,11 +69,11 @@ func (e *TimeoutError) Unwrap() error { return e.Err }
 
 // NewClient constructs a Kaggle CLI adapter with production dependencies.
 func NewClient() *Client {
-	return NewClientWithDeps(nil, osEnvSource{}, exec.LookPath, currentEnv, defaultTimeout)
+	return NewClientWithDeps(nil, osEnvSource{}, exec.LookPath, currentEnv, defaultTimeout, nil)
 }
 
 // NewClientWithDeps constructs a Kaggle CLI adapter with injected dependencies for tests.
-func NewClientWithDeps(runner Runner, env EnvSource, lookPath LookPathFunc, baseEnv func() []string, timeout time.Duration) *Client {
+func NewClientWithDeps(runner Runner, env EnvSource, lookPath LookPathFunc, baseEnv func() []string, timeout time.Duration, logger operationLogger) *Client {
 	if baseEnv == nil {
 		baseEnv = currentEnv
 	}
@@ -87,6 +89,9 @@ func NewClientWithDeps(runner Runner, env EnvSource, lookPath LookPathFunc, base
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
+	if logger == nil {
+		logger = newNoopLogger()
+	}
 
 	return &Client{
 		runner:         runner,
@@ -94,6 +99,7 @@ func NewClientWithDeps(runner Runner, env EnvSource, lookPath LookPathFunc, base
 		lookPath:       lookPath,
 		baseEnv:        baseEnv,
 		defaultTimeout: timeout,
+		logger:         logger,
 	}
 }
 
@@ -102,9 +108,15 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 	if c == nil {
 		return Result{}, fmt.Errorf("kaggle client is nil")
 	}
+	operation := operationName(args)
 
 	runtimeSetup, err := PrepareRuntime(c.env)
 	if err != nil {
+		c.logger.ErrorContext(ctx, "kaggle operation failed",
+			"operation", operation,
+			"args", sanitizeArgs(args),
+			"error", err,
+		)
 		return Result{}, err
 	}
 	defer func() {
@@ -122,6 +134,7 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 	if timeout <= 0 {
 		timeout = c.defaultTimeout
 	}
+	env := execx.MergeEnv(c.baseEnv(), append(runtimeSetup.Env, opts.Env...))
 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -131,17 +144,42 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 		Args: append([]string(nil), args...),
 	}
 
-	result, err := c.runner.Run(runCtx, command, RunOptions{
+	logAttrs := []any{
+		"operation", operation,
+		"args", sanitizeArgs(args),
+	}
+	if opts.Debug {
+		logAttrs = append(logAttrs,
+			"dir", opts.Dir,
+			"timeout", timeout.String(),
+			"auth_mode", runtimeSetup.AuthMode,
+			"auth_source", runtimeSetup.Source,
+			"env", sanitizeEnv(env),
+		)
+	}
+	c.logger.InfoContext(ctx, "kaggle operation start", logAttrs...)
+
+	result, err := c.runner.Run(runCtx, command, execx.Options{
 		Dir:     opts.Dir,
-		Env:     execx.MergeEnv(c.baseEnv(), append(runtimeSetup.Env, opts.Env...)),
+		Env:     env,
 		Timeout: timeout,
 	})
 	if err == nil {
+		c.logger.InfoContext(ctx, "kaggle operation complete",
+			"operation", operation,
+			"exit_code", result.ExitCode,
+		)
 		return result, nil
 	}
 
 	var timeoutErr *execx.TimeoutError
 	if errors.As(err, &timeoutErr) {
+		c.logger.ErrorContext(ctx, "kaggle operation timed out",
+			"operation", operation,
+			"args", sanitizeArgs(args),
+			"timeout", timeout.String(),
+			"error", err,
+		)
 		return result, &TimeoutError{
 			Args:    append([]string(nil), args...),
 			Timeout: timeout,
@@ -150,6 +188,12 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 	}
 
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		c.logger.ErrorContext(ctx, "kaggle operation timed out",
+			"operation", operation,
+			"args", sanitizeArgs(args),
+			"timeout", timeout.String(),
+			"error", err,
+		)
 		return result, &TimeoutError{
 			Args:    append([]string(nil), args...),
 			Timeout: timeout,
@@ -159,6 +203,13 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 
 	var exitErr *execx.ExitError
 	if errors.As(err, &exitErr) {
+		c.logger.ErrorContext(ctx, "kaggle operation failed",
+			"operation", operation,
+			"args", sanitizeArgs(args),
+			"exit_code", result.ExitCode,
+			"stderr", strings.TrimSpace(result.Stderr),
+			"error", err,
+		)
 		return result, &CommandError{
 			Args:     append([]string(nil), args...),
 			ExitCode: result.ExitCode,
@@ -168,5 +219,10 @@ func (c *Client) Run(ctx context.Context, args []string, opts RunOptions) (Resul
 		}
 	}
 
+	c.logger.ErrorContext(ctx, "kaggle operation failed",
+		"operation", operation,
+		"args", sanitizeArgs(args),
+		"error", err,
+	)
 	return result, fmt.Errorf("run kaggle command: %w", err)
 }
