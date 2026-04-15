@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -33,8 +34,8 @@ type Result struct {
 	Mode         string             `json:"mode"`
 	DryRun       bool               `json:"dry_run"`
 	ConfigPath   string             `json:"config_path"`
-	PollInterval time.Duration      `json:"poll_interval"`
-	PollTimeout  time.Duration      `json:"poll_timeout"`
+	PollInterval Duration           `json:"poll_interval"`
+	PollTimeout  Duration           `json:"poll_timeout"`
 	Execution    spec.ExecutionSpec `json:"execution"`
 	Bundle       *BundleResult      `json:"bundle,omitempty"`
 	Push         *PushResult        `json:"push,omitempty"`
@@ -62,8 +63,18 @@ type PollResult struct {
 	Terminal   kaggle.KernelPollTerminalState `json:"terminal,omitempty"`
 	StartedAt  time.Time                      `json:"started_at"`
 	FinishedAt time.Time                      `json:"finished_at"`
-	Elapsed    time.Duration                  `json:"elapsed"`
+	Elapsed    Duration                       `json:"elapsed"`
 	Raw        kaggle.KernelStatusRawStatus   `json:"raw,omitempty"`
+}
+
+type Duration time.Duration
+
+func (d Duration) String() string {
+	return time.Duration(d).String()
+}
+
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Duration(d).String())
 }
 
 type Adapter interface {
@@ -121,8 +132,8 @@ func (r *Runner) Execute(ctx context.Context, req Request) (Result, error) {
 		Mode:         ModeDryRun,
 		DryRun:       true,
 		ConfigPath:   req.ConfigPath,
-		PollInterval: effectivePollInterval(req.PollInterval, r.pollInterval),
-		PollTimeout:  effectivePollTimeout(req.PollTimeout, r.pollTimeout),
+		PollInterval: Duration(effectivePollInterval(req.PollInterval, r.pollInterval)),
+		PollTimeout:  Duration(effectivePollTimeout(req.PollTimeout, r.pollTimeout)),
 		Execution:    execSpec,
 	}
 	if !req.DryRun {
@@ -170,8 +181,8 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 
 	pollResp, err := r.adapter.PollKernelStatus(ctx, kaggle.KernelPollRequest{
 		KernelRef: pushResp.KernelRef,
-		Interval:  report.PollInterval,
-		Timeout:   report.PollTimeout,
+		Interval:  time.Duration(report.PollInterval),
+		Timeout:   time.Duration(report.PollTimeout),
 	})
 	if err != nil {
 		return report, fmt.Errorf("poll kaggle kernel: %w", err)
@@ -184,7 +195,7 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		Terminal:   pollResp.Terminal,
 		StartedAt:  pollResp.StartedAt,
 		FinishedAt: pollResp.FinishedAt,
-		Elapsed:    pollResp.Elapsed,
+		Elapsed:    Duration(pollResp.Elapsed),
 		Raw:        pollResp.KernelStatusResponse.Raw,
 	}
 

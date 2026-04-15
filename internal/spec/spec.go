@@ -22,7 +22,7 @@ type ExecutionSpec struct {
 	Resources   config.Resources `json:"resources" yaml:"resources"`
 	Sources     config.Sources   `json:"sources" yaml:"sources"`
 	Outputs     config.Outputs   `json:"outputs" yaml:"outputs"`
-	Overrides   RuntimeOverrides `json:"overrides,omitempty" yaml:"overrides,omitempty"`
+	Overrides   RuntimeOverrides `json:"overrides" yaml:"overrides,omitempty"`
 }
 
 // NewExecutionSpec merges a target definition with supported runtime overrides.
@@ -48,7 +48,7 @@ func NewExecutionSpec(name string, target config.Target, overrides RuntimeOverri
 		Competition: target.Competition,
 		Submit:      target.Submit,
 		Resources:   resources,
-		Sources:     target.Sources,
+		Sources:     target.Sources.Normalized(),
 		Outputs:     target.Outputs,
 		Overrides:   overrides,
 	}, nil

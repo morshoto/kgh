@@ -128,11 +128,20 @@ targets:
 	if !strings.Contains(stdout.String(), `"target_name": "exp142"`) {
 		t.Fatalf("expected target name in output, got %s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), `"poll_interval": 5000000000`) {
+	if !strings.Contains(stdout.String(), `"poll_interval": "5s"`) {
 		t.Fatalf("expected default poll interval in output, got %s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), `"poll_timeout": 1800000000000`) {
+	if !strings.Contains(stdout.String(), `"poll_timeout": "30m0s"`) {
 		t.Fatalf("expected default poll timeout in output, got %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"gpu": true`) {
+		t.Fatalf("expected snake_case resources in output, got %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"competition_sources": []`) {
+		t.Fatalf("expected empty sources arrays in output, got %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"overrides": {}`) {
+		t.Fatalf("expected empty overrides object in output, got %s", stdout.String())
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected no stderr, got %s", stderr.String())

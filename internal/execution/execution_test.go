@@ -86,10 +86,10 @@ targets:
 	if report.Execution.Outputs.Metrics != "metrics.json" {
 		t.Fatalf("unexpected metrics output %q", report.Execution.Outputs.Metrics)
 	}
-	if report.PollInterval != 5*time.Second {
+	if time.Duration(report.PollInterval) != 5*time.Second {
 		t.Fatalf("unexpected poll interval %s", report.PollInterval)
 	}
-	if report.PollTimeout != 30*time.Minute {
+	if time.Duration(report.PollTimeout) != 30*time.Minute {
 		t.Fatalf("unexpected poll timeout %s", report.PollTimeout)
 	}
 }
@@ -248,10 +248,10 @@ targets:
 	if report.Poll.Terminal != kaggle.KernelPollTerminalStateSucceeded {
 		t.Fatalf("unexpected terminal state %q", report.Poll.Terminal)
 	}
-	if report.PollInterval != 2*time.Second {
+	if time.Duration(report.PollInterval) != 2*time.Second {
 		t.Fatalf("unexpected effective poll interval %s", report.PollInterval)
 	}
-	if report.PollTimeout != 15*time.Second {
+	if time.Duration(report.PollTimeout) != 15*time.Second {
 		t.Fatalf("unexpected effective poll timeout %s", report.PollTimeout)
 	}
 }
