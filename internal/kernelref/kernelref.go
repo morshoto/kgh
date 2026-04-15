@@ -35,15 +35,24 @@ func ExtractFromText(output string) (string, error) {
 		return "", fmt.Errorf("kernel identity not found in push output")
 	}
 
-	matches := make(map[string]struct{})
+	urlMatches := make(map[string]struct{})
+	rawMatches := make(map[string]struct{})
 	for _, line := range strings.Split(trimmed, "\n") {
 		if ref, ok := extractURLRef(line); ok {
-			matches[ref] = struct{}{}
+			urlMatches[ref] = struct{}{}
+			continue
+		}
+		if strings.Contains(line, "://") {
 			continue
 		}
 		for _, ref := range extractRawRefs(line) {
-			matches[ref] = struct{}{}
+			rawMatches[ref] = struct{}{}
 		}
+	}
+
+	matches := urlMatches
+	if len(matches) == 0 {
+		matches = rawMatches
 	}
 
 	switch len(matches) {

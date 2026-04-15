@@ -138,16 +138,29 @@ func classifyCommandFailure(operation string, err *CommandError) (ErrorCategory,
 	stderr := strings.ToLower(strings.TrimSpace(err.Stderr))
 	stdout := strings.ToLower(strings.TrimSpace(err.Stdout))
 	combined := strings.TrimSpace(stderr + "\n" + stdout)
+	detail := summarizeCommandFailureDetail(err)
 
 	switch {
 	case containsAny(combined, "401", "unauthorized", "api credentials", "invalid credentials", "could not find kaggle.json", "credentials not found", "forbidden: you must provide a key"):
-		return ErrorCategoryInvalidCredentials, fmt.Sprintf("kaggle %s failed: Kaggle credentials were rejected", operation)
+		return ErrorCategoryInvalidCredentials, appendCommandFailureDetail(
+			fmt.Sprintf("kaggle %s failed: Kaggle credentials were rejected", operation),
+			detail,
+		)
 	case containsAny(combined, "403", "forbidden", "permission", "not allowed", "must accept", "rules", "join the competition", "not have permission"):
-		return ErrorCategoryPermissionDenied, fmt.Sprintf("kaggle %s failed: Kaggle denied permission for this operation", operation)
+		return ErrorCategoryPermissionDenied, appendCommandFailureDetail(
+			fmt.Sprintf("kaggle %s failed: Kaggle denied permission for this operation", operation),
+			detail,
+		)
 	case containsAny(combined, "404", "not found", "was not found", "invalid competition", "invalid kernel", "no such competition", "no such kernel"):
-		return ErrorCategoryInvalidReference, fmt.Sprintf("kaggle %s failed: Kaggle reference is invalid or does not exist", operation)
+		return ErrorCategoryInvalidReference, appendCommandFailureDetail(
+			fmt.Sprintf("kaggle %s failed: Kaggle reference is invalid or does not exist", operation),
+			detail,
+		)
 	default:
-		return ErrorCategoryCommandFailed, fmt.Sprintf("kaggle %s failed: Kaggle CLI command exited with an error", operation)
+		return ErrorCategoryCommandFailed, appendCommandFailureDetail(
+			fmt.Sprintf("kaggle %s failed: Kaggle CLI command exited with an error", operation),
+			detail,
+		)
 	}
 }
 
@@ -158,4 +171,34 @@ func containsAny(value string, patterns ...string) bool {
 		}
 	}
 	return false
+}
+
+func summarizeCommandFailureDetail(err *CommandError) string {
+	if err == nil {
+		return ""
+	}
+
+	detail := strings.TrimSpace(err.Stderr)
+	if detail == "" {
+		detail = strings.TrimSpace(err.Stdout)
+	}
+	if detail == "" && err.Err != nil {
+		detail = strings.TrimSpace(err.Err.Error())
+	}
+	if detail == "" {
+		return ""
+	}
+
+	detail = strings.Join(strings.Fields(detail), " ")
+	if len(detail) > 200 {
+		detail = detail[:197] + "..."
+	}
+	return detail
+}
+
+func appendCommandFailureDetail(message, detail string) string {
+	if strings.TrimSpace(detail) == "" {
+		return message
+	}
+	return message + ": " + detail
 }

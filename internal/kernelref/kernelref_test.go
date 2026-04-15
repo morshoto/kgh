@@ -75,6 +75,13 @@ func TestExtractFromText(t *testing.T) {
 			want:  "alice/exp142",
 		},
 		{
+			name: "prefer kaggle url over unrelated url-like tokens",
+			input: "source: https://en.wikipedia.org/wiki/Foo\n" +
+				"profile: https://www.kaggle.com/alice\n" +
+				"Kernel URL: https://www.kaggle.com/code/alice/exp142\n",
+			want: "alice/exp142",
+		},
+		{
 			name:    "missing",
 			input:   "Kernel pushed successfully",
 			wantErr: true,

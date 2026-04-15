@@ -61,6 +61,37 @@ func TestCLIAdapterPushKernel(t *testing.T) {
 	}
 }
 
+func TestCLIAdapterPushKernelIgnoresUnrelatedURLs(t *testing.T) {
+	t.Parallel()
+
+	fake := &adapterFakeClient{
+		t: t,
+		runFn: func(_ context.Context, args []string, opts RunOptions) (Result, error) {
+			if !equalStrings(args, []string{"kernels", "push", "-p", "/tmp/work tree"}) {
+				t.Fatalf("unexpected args %#v", args)
+			}
+			assertZeroRunOptions(t, opts)
+			return Result{
+				Stdout: "Reference: https://en.wikipedia.org/wiki/Foo\n" +
+					"Profile: https://www.kaggle.com/alice\n" +
+					"Kernel URL: https://www.kaggle.com/code/alice/exp142\n" +
+					"Kernel pushed successfully\n",
+				ExitCode: 0,
+			}, nil
+		},
+	}
+
+	resp, err := (&CLIAdapter{client: fake}).PushKernel(context.Background(), PushKernelRequest{
+		WorkDir: "/tmp/work tree",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.KernelRef != "alice/exp142" {
+		t.Fatalf("unexpected kernel ref %q", resp.KernelRef)
+	}
+}
+
 func TestCLIAdapterPushKernelMissingIdentity(t *testing.T) {
 	t.Parallel()
 
