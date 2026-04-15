@@ -61,6 +61,37 @@ func TestCLIAdapterPushKernel(t *testing.T) {
 	}
 }
 
+func TestCLIAdapterPushKernelIgnoresUnrelatedURLs(t *testing.T) {
+	t.Parallel()
+
+	fake := &adapterFakeClient{
+		t: t,
+		runFn: func(_ context.Context, args []string, opts RunOptions) (Result, error) {
+			if !equalStrings(args, []string{"kernels", "push", "-p", "/tmp/work tree"}) {
+				t.Fatalf("unexpected args %#v", args)
+			}
+			assertZeroRunOptions(t, opts)
+			return Result{
+				Stdout: "Reference: https://en.wikipedia.org/wiki/Foo\n" +
+					"Profile: https://www.kaggle.com/alice\n" +
+					"Kernel URL: https://www.kaggle.com/code/alice/exp142\n" +
+					"Kernel pushed successfully\n",
+				ExitCode: 0,
+			}, nil
+		},
+	}
+
+	resp, err := (&CLIAdapter{client: fake}).PushKernel(context.Background(), PushKernelRequest{
+		WorkDir: "/tmp/work tree",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.KernelRef != "alice/exp142" {
+		t.Fatalf("unexpected kernel ref %q", resp.KernelRef)
+	}
+}
+
 func TestCLIAdapterPushKernelMissingIdentity(t *testing.T) {
 	t.Parallel()
 
@@ -109,7 +140,7 @@ func TestCLIAdapterKernelStatus(t *testing.T) {
 	if resp.KernelRef != "alice/exp142" {
 		t.Fatalf("unexpected kernel ref %q", resp.KernelRef)
 	}
-	if resp.Status != "complete" || resp.Message != "finished" {
+	if resp.Status != "COMPLETE" || resp.Message != "finished" {
 		t.Fatalf("unexpected status response %+v", resp)
 	}
 	if resp.Raw.ExitCode != 0 {
@@ -215,7 +246,7 @@ func TestParseKernelStatusResultPreservesRawFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if resp.Status != "running" {
+	if resp.Status != "RUNNING" {
 		t.Fatalf("unexpected status %q", resp.Status)
 	}
 	if resp.Message != "queued for execution" {
@@ -229,6 +260,26 @@ func TestParseKernelStatusResultPreservesRawFields(t *testing.T) {
 	}
 	if resp.Raw.Stderr != "warning: slow queue\n" {
 		t.Fatalf("unexpected raw stderr %q", resp.Raw.Stderr)
+	}
+}
+
+func TestParseKernelStatusResultEnumStyleStatus(t *testing.T) {
+	t.Parallel()
+
+	result := Result{
+		Stdout:   `bloodymonday/issue7-e2e has status "KernelWorkerStatus.COMPLETE"` + "\n",
+		ExitCode: 0,
+	}
+
+	resp, err := parseKernelStatusResult("bloodymonday/issue7-e2e", result)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.Status != "COMPLETE" {
+		t.Fatalf("unexpected status %q", resp.Status)
+	}
+	if resp.Raw.Stdout != result.Stdout {
+		t.Fatalf("unexpected raw stdout %q", resp.Raw.Stdout)
 	}
 }
 

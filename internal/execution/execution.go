@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -20,21 +21,25 @@ const (
 )
 
 type Request struct {
-	Target     string
-	DryRun     bool
-	GPU        *bool
-	Internet   *bool
-	ConfigPath string
+	Target       string
+	DryRun       bool
+	GPU          *bool
+	Internet     *bool
+	ConfigPath   string
+	PollInterval time.Duration
+	PollTimeout  time.Duration
 }
 
 type Result struct {
-	Mode       string             `json:"mode"`
-	DryRun     bool               `json:"dry_run"`
-	ConfigPath string             `json:"config_path"`
-	Execution  spec.ExecutionSpec `json:"execution"`
-	Bundle     *BundleResult      `json:"bundle,omitempty"`
-	Push       *PushResult        `json:"push,omitempty"`
-	Poll       *PollResult        `json:"poll,omitempty"`
+	Mode         string             `json:"mode"`
+	DryRun       bool               `json:"dry_run"`
+	ConfigPath   string             `json:"config_path"`
+	PollInterval Duration           `json:"poll_interval"`
+	PollTimeout  Duration           `json:"poll_timeout"`
+	Execution    spec.ExecutionSpec `json:"execution"`
+	Bundle       *BundleResult      `json:"bundle,omitempty"`
+	Push         *PushResult        `json:"push,omitempty"`
+	Poll         *PollResult        `json:"poll,omitempty"`
 }
 
 type BundleResult struct {
@@ -58,8 +63,18 @@ type PollResult struct {
 	Terminal   kaggle.KernelPollTerminalState `json:"terminal,omitempty"`
 	StartedAt  time.Time                      `json:"started_at"`
 	FinishedAt time.Time                      `json:"finished_at"`
-	Elapsed    time.Duration                  `json:"elapsed"`
+	Elapsed    Duration                       `json:"elapsed"`
 	Raw        kaggle.KernelStatusRawStatus   `json:"raw,omitempty"`
+}
+
+type Duration time.Duration
+
+func (d Duration) String() string {
+	return time.Duration(d).String()
+}
+
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Duration(d).String())
 }
 
 type Adapter interface {
@@ -114,10 +129,12 @@ func (r *Runner) Execute(ctx context.Context, req Request) (Result, error) {
 	}
 
 	report := Result{
-		Mode:       ModeDryRun,
-		DryRun:     true,
-		ConfigPath: req.ConfigPath,
-		Execution:  execSpec,
+		Mode:         ModeDryRun,
+		DryRun:       true,
+		ConfigPath:   req.ConfigPath,
+		PollInterval: Duration(effectivePollInterval(req.PollInterval, r.pollInterval)),
+		PollTimeout:  Duration(effectivePollTimeout(req.PollTimeout, r.pollTimeout)),
+		Execution:    execSpec,
 	}
 	if !req.DryRun {
 		return r.executeLive(ctx, execSpec, report)
@@ -162,19 +179,10 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		Stderr:    pushResp.Output.Stderr,
 	}
 
-	pollTimeout := r.pollTimeout
-	if pollTimeout <= 0 {
-		pollTimeout = 30 * time.Minute
-	}
-	pollInterval := r.pollInterval
-	if pollInterval <= 0 {
-		pollInterval = 5 * time.Second
-	}
-
 	pollResp, err := r.adapter.PollKernelStatus(ctx, kaggle.KernelPollRequest{
 		KernelRef: pushResp.KernelRef,
-		Interval:  pollInterval,
-		Timeout:   pollTimeout,
+		Interval:  time.Duration(report.PollInterval),
+		Timeout:   time.Duration(report.PollTimeout),
 	})
 	if err != nil {
 		return report, fmt.Errorf("poll kaggle kernel: %w", err)
@@ -187,9 +195,29 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		Terminal:   pollResp.Terminal,
 		StartedAt:  pollResp.StartedAt,
 		FinishedAt: pollResp.FinishedAt,
-		Elapsed:    pollResp.Elapsed,
+		Elapsed:    Duration(pollResp.Elapsed),
 		Raw:        pollResp.KernelStatusResponse.Raw,
 	}
 
 	return report, nil
+}
+
+func effectivePollInterval(requested, fallback time.Duration) time.Duration {
+	if requested > 0 {
+		return requested
+	}
+	if fallback > 0 {
+		return fallback
+	}
+	return 5 * time.Second
+}
+
+func effectivePollTimeout(requested, fallback time.Duration) time.Duration {
+	if requested > 0 {
+		return requested
+	}
+	if fallback > 0 {
+		return fallback
+	}
+	return 30 * time.Minute
 }

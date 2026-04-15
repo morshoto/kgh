@@ -253,14 +253,23 @@ func isTerminalKernelStatus(status string) bool {
 }
 
 func classifyTerminalKernelStatus(status string) (KernelPollTerminalState, bool) {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "complete", "completed":
+	switch normalizeKernelStatus(status) {
+	case "COMPLETE", "COMPLETED":
 		return KernelPollTerminalStateSucceeded, true
-	case "failed", "failure", "error":
+	case "FAILED", "FAILURE", "ERROR":
 		return KernelPollTerminalStateFailed, true
-	case "cancelled", "canceled", "aborted", "terminated":
+	case "CANCELLED", "CANCELED", "ABORTED", "TERMINATED":
 		return KernelPollTerminalStateCancelled, true
 	default:
 		return KernelPollTerminalStateUnknown, false
 	}
+}
+
+func normalizeKernelStatus(status string) string {
+	status = strings.TrimSpace(status)
+	status = strings.Trim(status, `"'`)
+	if index := strings.LastIndex(status, "."); index >= 0 {
+		status = status[index+1:]
+	}
+	return strings.ToUpper(status)
 }

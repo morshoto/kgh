@@ -1,6 +1,7 @@
 package kaggle
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -158,6 +159,13 @@ func copyNotebookToBundle(src, workDir string) (string, error) {
 			Err:  err,
 		}
 	}
+	if err := normalizeNotebookForKaggle(dst); err != nil {
+		return "", &StagingError{
+			Op:   "normalize notebook",
+			Path: dst,
+			Err:  err,
+		}
+	}
 	return dst, nil
 }
 
@@ -218,4 +226,85 @@ func verifyFile(path string) error {
 		}
 	}
 	return nil
+}
+
+func normalizeNotebookForKaggle(path string) error {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	var notebook map[string]any
+	if err := json.Unmarshal(body, &notebook); err != nil {
+		return err
+	}
+
+	metadata := ensureObject(notebook, "metadata")
+	changed := false
+
+	if _, ok := metadata["kernelspec"]; !ok {
+		if kernelspec, found := findCellMetadataObject(notebook, "kernelspec"); found {
+			metadata["kernelspec"] = kernelspec
+		} else {
+			metadata["kernelspec"] = map[string]any{
+				"display_name": "Python 3",
+				"language":     "python",
+				"name":         "python3",
+			}
+		}
+		changed = true
+	}
+
+	if _, ok := metadata["language_info"]; !ok {
+		if languageInfo, found := findCellMetadataObject(notebook, "language_info"); found {
+			metadata["language_info"] = languageInfo
+		} else {
+			metadata["language_info"] = map[string]any{
+				"name": "python",
+			}
+		}
+		changed = true
+	}
+
+	if !changed {
+		return nil
+	}
+
+	normalized, err := json.Marshal(notebook)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, normalized, 0o644)
+}
+
+func ensureObject(parent map[string]any, key string) map[string]any {
+	if value, ok := parent[key].(map[string]any); ok {
+		return value
+	}
+	child := map[string]any{}
+	parent[key] = child
+	return child
+}
+
+func findCellMetadataObject(notebook map[string]any, key string) (map[string]any, bool) {
+	cells, ok := notebook["cells"].([]any)
+	if !ok {
+		return nil, false
+	}
+	for _, cellValue := range cells {
+		cell, ok := cellValue.(map[string]any)
+		if !ok {
+			continue
+		}
+		cellMetadata, ok := cell["metadata"].(map[string]any)
+		if !ok {
+			continue
+		}
+		value, ok := cellMetadata[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		return value, true
+	}
+	return nil, false
 }

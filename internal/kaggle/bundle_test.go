@@ -1,6 +1,7 @@
 package kaggle
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -67,8 +68,20 @@ func TestStageKernelBundle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read staged notebook: %v", err)
 	}
-	if string(gotNotebook) != notebookBody {
-		t.Fatalf("unexpected staged notebook body %q", string(gotNotebook))
+	var stagedNotebook map[string]any
+	if err := json.Unmarshal(gotNotebook, &stagedNotebook); err != nil {
+		t.Fatalf("unmarshal staged notebook: %v", err)
+	}
+	metadata, ok := stagedNotebook["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected notebook metadata, got %+v", stagedNotebook)
+	}
+	kernelspec, ok := metadata["kernelspec"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected kernelspec metadata, got %+v", metadata)
+	}
+	if kernelspec["name"] != "python3" {
+		t.Fatalf("unexpected kernelspec %+v", kernelspec)
 	}
 
 	gotMetadata, err := os.ReadFile(bundle.MetadataPath)
@@ -110,5 +123,76 @@ func TestStageKernelBundleMissingNotebook(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "notebook file is missing") {
 		t.Fatalf("unexpected error %q", err)
+	}
+}
+
+func TestStageKernelBundlePromotesCellKernelMetadata(t *testing.T) {
+	t.Parallel()
+
+	sourceDir := t.TempDir()
+	sourceNotebook := filepath.Join(sourceDir, "notebooks", "notebook.ipynb")
+	if err := os.MkdirAll(filepath.Dir(sourceNotebook), 0o755); err != nil {
+		t.Fatalf("create notebook dir: %v", err)
+	}
+	const notebookBody = `{
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "kernelspec": {
+          "display_name": "Python 3",
+          "language": "python",
+          "name": "python3"
+        },
+        "language_info": {
+          "name": "python"
+        }
+      },
+      "source": [
+        "# Sample notebook"
+      ]
+    }
+  ],
+  "metadata": {},
+  "nbformat": 4,
+  "nbformat_minor": 5
+}`
+	if err := os.WriteFile(sourceNotebook, []byte(notebookBody), 0o644); err != nil {
+		t.Fatalf("write notebook: %v", err)
+	}
+
+	bundle, err := StageKernelBundle(spec.ExecutionSpec{
+		Notebook:  sourceNotebook,
+		KernelID:  "yourname/notebook",
+		KernelRef: "yourname/notebook",
+	})
+	if err != nil {
+		t.Fatalf("stage bundle: %v", err)
+	}
+	defer func() {
+		if err := bundle.Cleanup(); err != nil {
+			t.Fatalf("cleanup bundle: %v", err)
+		}
+	}()
+
+	gotNotebook, err := os.ReadFile(bundle.NotebookPath)
+	if err != nil {
+		t.Fatalf("read staged notebook: %v", err)
+	}
+	var stagedNotebook map[string]any
+	if err := json.Unmarshal(gotNotebook, &stagedNotebook); err != nil {
+		t.Fatalf("unmarshal staged notebook: %v", err)
+	}
+	metadata, ok := stagedNotebook["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected notebook metadata, got %+v", stagedNotebook)
+	}
+	kernelspec, ok := metadata["kernelspec"].(map[string]any)
+	if !ok || kernelspec["name"] != "python3" {
+		t.Fatalf("expected promoted kernelspec, got %+v", metadata["kernelspec"])
+	}
+	languageInfo, ok := metadata["language_info"].(map[string]any)
+	if !ok || languageInfo["name"] != "python" {
+		t.Fatalf("expected promoted language_info, got %+v", metadata["language_info"])
 	}
 }

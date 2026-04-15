@@ -18,29 +18,29 @@ type Config struct {
 }
 
 type Target struct {
-	Notebook    string    `yaml:"notebook"`
-	KernelID    string    `yaml:"kernel_id"`
-	Competition string    `yaml:"competition"`
-	Submit      bool      `yaml:"submit"`
-	Resources   Resources `yaml:"resources"`
-	Sources     Sources   `yaml:"sources"`
-	Outputs     Outputs   `yaml:"outputs"`
+	Notebook    string    `json:"notebook" yaml:"notebook"`
+	KernelID    string    `json:"kernel_id" yaml:"kernel_id"`
+	Competition string    `json:"competition" yaml:"competition"`
+	Submit      bool      `json:"submit" yaml:"submit"`
+	Resources   Resources `json:"resources" yaml:"resources"`
+	Sources     Sources   `json:"sources" yaml:"sources"`
+	Outputs     Outputs   `json:"outputs" yaml:"outputs"`
 }
 
 type Resources struct {
-	GPU      bool `yaml:"gpu"`
-	Internet bool `yaml:"internet"`
-	Private  bool `yaml:"private"`
+	GPU      bool `json:"gpu" yaml:"gpu"`
+	Internet bool `json:"internet" yaml:"internet"`
+	Private  bool `json:"private" yaml:"private"`
 }
 
 type Sources struct {
-	CompetitionSources []string `yaml:"competition_sources"`
-	DatasetSources     []string `yaml:"dataset_sources"`
+	CompetitionSources []string `json:"competition_sources" yaml:"competition_sources"`
+	DatasetSources     []string `json:"dataset_sources" yaml:"dataset_sources"`
 }
 
 type Outputs struct {
-	Submission string `yaml:"submission"`
-	Metrics    string `yaml:"metrics"`
+	Submission string `json:"submission" yaml:"submission"`
+	Metrics    string `json:"metrics" yaml:"metrics"`
 }
 
 type ValidationError struct {
@@ -190,6 +190,16 @@ func parseTarget(name string, m map[string]any) (Target, error) {
 	return t, nil
 }
 
+func (s Sources) Normalized() Sources {
+	if s.CompetitionSources == nil {
+		s.CompetitionSources = []string{}
+	}
+	if s.DatasetSources == nil {
+		s.DatasetSources = []string{}
+	}
+	return s
+}
+
 func stringValue(m map[string]any, key string) string {
 	v, ok := m[key]
 	if !ok || v == nil {
@@ -211,11 +221,11 @@ func boolValue(m map[string]any, key string) bool {
 func stringSliceValue(m map[string]any, key string) []string {
 	v, ok := m[key]
 	if !ok || v == nil {
-		return nil
+		return []string{}
 	}
 	raw, ok := v.([]any)
 	if !ok {
-		return nil
+		return []string{}
 	}
 	out := make([]string, 0, len(raw))
 	for _, item := range raw {

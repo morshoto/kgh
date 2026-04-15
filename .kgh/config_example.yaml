@@ -1,18 +1,9 @@
 targets:
-  exp142:
-    notebook: notebooks/exp142.ipynb
-    kernel_id: yourname/exp142
+  issue7-e2e:
+    notebook: notebooks/issue7-e2e.ipynb
+    kernel_id: yourname/issue7-e2e
     competition: playground-series-s6e2
-    submit: true
     resources:
-      gpu: true
+      gpu: false
       internet: false
-      private: true
-    sources:
-      competition_sources:
-        - playground-series-s6e2
-      dataset_sources:
-        - yourname/feature-pack-v3
-    outputs:
-      submission: submission.csv
-      metrics: metrics.json
+      private: false

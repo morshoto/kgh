@@ -33,3 +33,6 @@ go.work.sum
 
 # local Go binaries
 kgh
+
+# local kgh config
+.kgh/config.yaml
