@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shotomorisk/kgh/internal/execution"
 )
@@ -52,10 +53,12 @@ func runWithIO(args []string, stdout, stderr io.Writer) int {
 }
 
 type runFlags struct {
-	target   string
-	dryRun   bool
-	gpu      *bool
-	internet *bool
+	target       string
+	dryRun       bool
+	gpu          *bool
+	internet     *bool
+	pollInterval time.Duration
+	timeout      time.Duration
 }
 
 func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
@@ -66,11 +69,13 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (i
 
 	runner := execution.NewRunner(nil)
 	report, err := runner.Execute(ctx, execution.Request{
-		Target:     flags.target,
-		DryRun:     flags.dryRun,
-		GPU:        flags.gpu,
-		Internet:   flags.internet,
-		ConfigPath: execution.DefaultConfigPath,
+		Target:       flags.target,
+		DryRun:       flags.dryRun,
+		GPU:          flags.gpu,
+		Internet:     flags.internet,
+		ConfigPath:   execution.DefaultConfigPath,
+		PollInterval: flags.pollInterval,
+		PollTimeout:  flags.timeout,
 	})
 	if err != nil {
 		return 1, err
@@ -95,6 +100,8 @@ func parseRunFlags(args []string) (runFlags, error) {
 
 	fs.StringVar(&flags.target, "target", "", "target name to run")
 	fs.BoolVar(&flags.dryRun, "dry-run", true, "print resolved execution JSON without invoking Kaggle")
+	fs.DurationVar(&flags.pollInterval, "poll-interval", 0, "poll interval for live Kaggle status checks")
+	fs.DurationVar(&flags.timeout, "timeout", 0, "timeout for live Kaggle polling")
 	fs.Func("gpu", "override GPU setting with true or false", func(value string) error {
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {
@@ -117,6 +124,12 @@ func parseRunFlags(args []string) (runFlags, error) {
 	}
 	if len(fs.Args()) != 0 {
 		return runFlags{}, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if flags.pollInterval < 0 {
+		return runFlags{}, fmt.Errorf("--poll-interval must be greater than or equal to 0")
+	}
+	if flags.timeout < 0 {
+		return runFlags{}, fmt.Errorf("--timeout must be greater than or equal to 0")
 	}
 	if strings.TrimSpace(flags.target) == "" {
 		return runFlags{}, fmt.Errorf("--target is required")
@@ -141,6 +154,7 @@ Available Commands:
 
 Examples:
   kgh run --target exp142
+  kgh run --target exp142 --poll-interval=2s --timeout=5m
   kgh run --target exp142 --dry-run=false
   kgh version
 `)

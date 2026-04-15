@@ -29,8 +29,46 @@ go build ./cmd/kgh
 To run a target locally, create `.kgh/config.yaml` from `.kgh/config_example.yaml` and then:
 
 ```bash
-./kgh run --target exp142
-./kgh run --target exp142 --dry-run=false
+./kgh run --target issue7-e2e
+./kgh run --target issue7-e2e --dry-run=false
+```
+
+`kgh run` defaults to `--dry-run=true`. Live runs poll Kaggle every `5s` for up to `30m`.
+
+```bash
+./kgh run --target issue7-e2e --dry-run=false --poll-interval=2s --timeout=5m
+```
+
+### Issue 7 live verification
+
+Use the committed smoke fixture for repeatable Kaggle verification:
+
+- target config example: `.kgh/config.issue7_example.yaml`
+- notebook fixture: `notebooks/issue7-e2e.ipynb`
+- verified kernel ref: `bloodymonday/issue7-e2e`
+
+Keep `.kgh/config.yaml` local-only. Copy one of the example configs and adjust it for your Kaggle account before running live commands.
+
+Credential setup:
+
+```bash
+export KAGGLE_USERNAME=<username>
+export KAGGLE_KEY=<api-key>
+```
+
+Verification commands:
+
+```bash
+go run ./cmd/kgh/main.go kgh run --target issue7-e2e --dry-run
+go run ./cmd/kgh/main.go kgh run --target issue7-e2e --dry-run=false --poll-interval=2s --timeout=5m
+kaggle kernels status bloodymonday/issue7-e2e
+```
+
+Manual fallback:
+
+```bash
+kaggle kernels push -p <bundle-dir>
+kaggle kernels status <owner>/<kernel-slug>
 ```
 
 ### Kaggle smoke test

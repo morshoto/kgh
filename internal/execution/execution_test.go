@@ -86,6 +86,12 @@ targets:
 	if report.Execution.Outputs.Metrics != "metrics.json" {
 		t.Fatalf("unexpected metrics output %q", report.Execution.Outputs.Metrics)
 	}
+	if report.PollInterval != 5*time.Second {
+		t.Fatalf("unexpected poll interval %s", report.PollInterval)
+	}
+	if report.PollTimeout != 30*time.Minute {
+		t.Fatalf("unexpected poll timeout %s", report.PollTimeout)
+	}
 }
 
 func TestRunnerExecuteMissingTarget(t *testing.T) {
@@ -185,6 +191,12 @@ targets:
 			if req.KernelRef != "yourname/exp142" {
 				t.Fatalf("unexpected kernel ref %q", req.KernelRef)
 			}
+			if req.Interval != 2*time.Second {
+				t.Fatalf("unexpected poll interval %s", req.Interval)
+			}
+			if req.Timeout != 15*time.Second {
+				t.Fatalf("unexpected poll timeout %s", req.Timeout)
+			}
 			return kaggle.KernelPollResult{
 				KernelStatusResponse: kaggle.KernelStatusResponse{
 					KernelRef: "yourname/exp142",
@@ -208,9 +220,11 @@ targets:
 	runner.pollInterval = time.Second
 
 	report, err := runner.Execute(context.Background(), Request{
-		Target:     "exp142",
-		DryRun:     false,
-		ConfigPath: configPath,
+		Target:       "exp142",
+		DryRun:       false,
+		ConfigPath:   configPath,
+		PollInterval: 2 * time.Second,
+		PollTimeout:  15 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -233,6 +247,12 @@ targets:
 	}
 	if report.Poll.Terminal != kaggle.KernelPollTerminalStateSucceeded {
 		t.Fatalf("unexpected terminal state %q", report.Poll.Terminal)
+	}
+	if report.PollInterval != 2*time.Second {
+		t.Fatalf("unexpected effective poll interval %s", report.PollInterval)
+	}
+	if report.PollTimeout != 15*time.Second {
+		t.Fatalf("unexpected effective poll timeout %s", report.PollTimeout)
 	}
 }
 

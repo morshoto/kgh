@@ -20,21 +20,25 @@ const (
 )
 
 type Request struct {
-	Target     string
-	DryRun     bool
-	GPU        *bool
-	Internet   *bool
-	ConfigPath string
+	Target       string
+	DryRun       bool
+	GPU          *bool
+	Internet     *bool
+	ConfigPath   string
+	PollInterval time.Duration
+	PollTimeout  time.Duration
 }
 
 type Result struct {
-	Mode       string             `json:"mode"`
-	DryRun     bool               `json:"dry_run"`
-	ConfigPath string             `json:"config_path"`
-	Execution  spec.ExecutionSpec `json:"execution"`
-	Bundle     *BundleResult      `json:"bundle,omitempty"`
-	Push       *PushResult        `json:"push,omitempty"`
-	Poll       *PollResult        `json:"poll,omitempty"`
+	Mode         string             `json:"mode"`
+	DryRun       bool               `json:"dry_run"`
+	ConfigPath   string             `json:"config_path"`
+	PollInterval time.Duration      `json:"poll_interval"`
+	PollTimeout  time.Duration      `json:"poll_timeout"`
+	Execution    spec.ExecutionSpec `json:"execution"`
+	Bundle       *BundleResult      `json:"bundle,omitempty"`
+	Push         *PushResult        `json:"push,omitempty"`
+	Poll         *PollResult        `json:"poll,omitempty"`
 }
 
 type BundleResult struct {
@@ -114,10 +118,12 @@ func (r *Runner) Execute(ctx context.Context, req Request) (Result, error) {
 	}
 
 	report := Result{
-		Mode:       ModeDryRun,
-		DryRun:     true,
-		ConfigPath: req.ConfigPath,
-		Execution:  execSpec,
+		Mode:         ModeDryRun,
+		DryRun:       true,
+		ConfigPath:   req.ConfigPath,
+		PollInterval: effectivePollInterval(req.PollInterval, r.pollInterval),
+		PollTimeout:  effectivePollTimeout(req.PollTimeout, r.pollTimeout),
+		Execution:    execSpec,
 	}
 	if !req.DryRun {
 		return r.executeLive(ctx, execSpec, report)
@@ -162,19 +168,10 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		Stderr:    pushResp.Output.Stderr,
 	}
 
-	pollTimeout := r.pollTimeout
-	if pollTimeout <= 0 {
-		pollTimeout = 30 * time.Minute
-	}
-	pollInterval := r.pollInterval
-	if pollInterval <= 0 {
-		pollInterval = 5 * time.Second
-	}
-
 	pollResp, err := r.adapter.PollKernelStatus(ctx, kaggle.KernelPollRequest{
 		KernelRef: pushResp.KernelRef,
-		Interval:  pollInterval,
-		Timeout:   pollTimeout,
+		Interval:  report.PollInterval,
+		Timeout:   report.PollTimeout,
 	})
 	if err != nil {
 		return report, fmt.Errorf("poll kaggle kernel: %w", err)
@@ -192,4 +189,24 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 	}
 
 	return report, nil
+}
+
+func effectivePollInterval(requested, fallback time.Duration) time.Duration {
+	if requested > 0 {
+		return requested
+	}
+	if fallback > 0 {
+		return fallback
+	}
+	return 5 * time.Second
+}
+
+func effectivePollTimeout(requested, fallback time.Duration) time.Duration {
+	if requested > 0 {
+		return requested
+	}
+	if fallback > 0 {
+		return fallback
+	}
+	return 30 * time.Minute
 }
