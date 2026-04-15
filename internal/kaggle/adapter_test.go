@@ -109,7 +109,7 @@ func TestCLIAdapterKernelStatus(t *testing.T) {
 	if resp.KernelRef != "alice/exp142" {
 		t.Fatalf("unexpected kernel ref %q", resp.KernelRef)
 	}
-	if resp.Status != "complete" || resp.Message != "finished" {
+	if resp.Status != "COMPLETE" || resp.Message != "finished" {
 		t.Fatalf("unexpected status response %+v", resp)
 	}
 	if resp.Raw.ExitCode != 0 {
@@ -215,7 +215,7 @@ func TestParseKernelStatusResultPreservesRawFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if resp.Status != "running" {
+	if resp.Status != "RUNNING" {
 		t.Fatalf("unexpected status %q", resp.Status)
 	}
 	if resp.Message != "queued for execution" {
@@ -229,6 +229,26 @@ func TestParseKernelStatusResultPreservesRawFields(t *testing.T) {
 	}
 	if resp.Raw.Stderr != "warning: slow queue\n" {
 		t.Fatalf("unexpected raw stderr %q", resp.Raw.Stderr)
+	}
+}
+
+func TestParseKernelStatusResultEnumStyleStatus(t *testing.T) {
+	t.Parallel()
+
+	result := Result{
+		Stdout:   `bloodymonday/issue7-e2e has status "KernelWorkerStatus.COMPLETE"` + "\n",
+		ExitCode: 0,
+	}
+
+	resp, err := parseKernelStatusResult("bloodymonday/issue7-e2e", result)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.Status != "COMPLETE" {
+		t.Fatalf("unexpected status %q", resp.Status)
+	}
+	if resp.Raw.Stdout != result.Stdout {
+		t.Fatalf("unexpected raw stdout %q", resp.Raw.Stdout)
 	}
 }
 

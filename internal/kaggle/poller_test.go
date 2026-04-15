@@ -16,7 +16,7 @@ func TestKernelPollerStopsOnTerminalStatus(t *testing.T) {
 		t: t,
 		responses: []KernelStatusResponse{
 			{KernelRef: "alice/exp142", Status: "running", Message: "queued"},
-			{KernelRef: "alice/exp142", Status: "complete", Message: "finished"},
+			{KernelRef: "alice/exp142", Status: "KernelWorkerStatus.COMPLETE", Message: "finished"},
 		},
 	}
 	poller := NewKernelPollerWithDeps(client, clock.Now, clock.Sleep)
@@ -31,7 +31,7 @@ func TestKernelPollerStopsOnTerminalStatus(t *testing.T) {
 	if result.Attempts != 2 {
 		t.Fatalf("expected two attempts, got %d", result.Attempts)
 	}
-	if result.Status != "complete" || result.Message != "finished" {
+	if result.Status != "KernelWorkerStatus.COMPLETE" || result.Message != "finished" {
 		t.Fatalf("unexpected result %+v", result)
 	}
 	if result.Terminal != KernelPollTerminalStateSucceeded {
@@ -59,8 +59,8 @@ func TestKernelPollerAppliesBackoffStrategy(t *testing.T) {
 		t: t,
 		responses: []KernelStatusResponse{
 			{KernelRef: "alice/exp142", Status: "running"},
-			{KernelRef: "alice/exp142", Status: "running"},
-			{KernelRef: "alice/exp142", Status: "complete"},
+			{KernelRef: "alice/exp142", Status: "KernelWorkerStatus.RUNNING"},
+			{KernelRef: "alice/exp142", Status: "COMPLETE"},
 		},
 	}
 	poller := NewKernelPollerWithDeps(client, clock.Now, clock.Sleep)
@@ -87,8 +87,8 @@ func TestKernelPollerReturnsTimeoutError(t *testing.T) {
 	client := &pollerFakeClient{
 		t: t,
 		responses: []KernelStatusResponse{
-			{KernelRef: "alice/exp142", Status: "running", Message: "queued"},
-			{KernelRef: "alice/exp142", Status: "running", Message: "still queued"},
+			{KernelRef: "alice/exp142", Status: "RUNNING", Message: "queued"},
+			{KernelRef: "alice/exp142", Status: "KernelWorkerStatus.RUNNING", Message: "still queued"},
 			{KernelRef: "alice/exp142", Status: "running", Message: "still queued"},
 		},
 	}
@@ -170,7 +170,7 @@ func TestKernelPollerReturnsTerminalErrorForFailedStatus(t *testing.T) {
 		t: t,
 		responses: []KernelStatusResponse{
 			{KernelRef: "alice/exp142", Status: "running", Message: "queued"},
-			{KernelRef: "alice/exp142", Status: "failed", Message: "kernel crashed"},
+			{KernelRef: "alice/exp142", Status: "KernelWorkerStatus.FAILED", Message: "kernel crashed"},
 		},
 	}
 	poller := NewKernelPollerWithDeps(client, clock.Now, clock.Sleep)
@@ -189,7 +189,7 @@ func TestKernelPollerReturnsTerminalErrorForFailedStatus(t *testing.T) {
 	if terminalErr.Terminal != KernelPollTerminalStateFailed {
 		t.Fatalf("unexpected terminal state %q", terminalErr.Terminal)
 	}
-	if terminalErr.LastStatus != "failed" || terminalErr.LastMessage != "kernel crashed" {
+	if terminalErr.LastStatus != "KernelWorkerStatus.FAILED" || terminalErr.LastMessage != "kernel crashed" {
 		t.Fatalf("unexpected terminal error %+v", terminalErr)
 	}
 	if result.Terminal != KernelPollTerminalStateFailed {
@@ -208,7 +208,7 @@ func TestKernelPollerReturnsTerminalErrorForCancelledStatus(t *testing.T) {
 		t: t,
 		responses: []KernelStatusResponse{
 			{KernelRef: "alice/exp142", Status: "running", Message: "queued"},
-			{KernelRef: "alice/exp142", Status: "cancelled", Message: "user cancelled"},
+			{KernelRef: "alice/exp142", Status: "KernelWorkerStatus.CANCELLED", Message: "user cancelled"},
 		},
 	}
 	poller := NewKernelPollerWithDeps(client, clock.Now, clock.Sleep)
@@ -227,7 +227,7 @@ func TestKernelPollerReturnsTerminalErrorForCancelledStatus(t *testing.T) {
 	if terminalErr.Terminal != KernelPollTerminalStateCancelled {
 		t.Fatalf("unexpected terminal state %q", terminalErr.Terminal)
 	}
-	if terminalErr.LastStatus != "cancelled" || terminalErr.LastMessage != "user cancelled" {
+	if terminalErr.LastStatus != "KernelWorkerStatus.CANCELLED" || terminalErr.LastMessage != "user cancelled" {
 		t.Fatalf("unexpected terminal error %+v", terminalErr)
 	}
 	if result.Terminal != KernelPollTerminalStateCancelled {
@@ -246,11 +246,15 @@ func TestIsTerminalKernelStatus(t *testing.T) {
 		want   bool
 	}{
 		{status: "complete", want: true},
+		{status: "KernelWorkerStatus.COMPLETE", want: true},
 		{status: "completed", want: true},
 		{status: "failed", want: true},
+		{status: "KernelWorkerStatus.FAILED", want: true},
 		{status: "error", want: true},
 		{status: "cancelled", want: true},
+		{status: "KernelWorkerStatus.CANCELLED", want: true},
 		{status: "running", want: false},
+		{status: "KernelWorkerStatus.RUNNING", want: false},
 		{status: "queued", want: false},
 	}
 
@@ -275,11 +279,15 @@ func TestClassifyTerminalKernelStatus(t *testing.T) {
 		ok     bool
 	}{
 		{status: "complete", want: KernelPollTerminalStateSucceeded, ok: true},
+		{status: "KernelWorkerStatus.COMPLETE", want: KernelPollTerminalStateSucceeded, ok: true},
 		{status: "failed", want: KernelPollTerminalStateFailed, ok: true},
+		{status: "KernelWorkerStatus.FAILED", want: KernelPollTerminalStateFailed, ok: true},
 		{status: "error", want: KernelPollTerminalStateFailed, ok: true},
 		{status: "cancelled", want: KernelPollTerminalStateCancelled, ok: true},
+		{status: "KernelWorkerStatus.CANCELLED", want: KernelPollTerminalStateCancelled, ok: true},
 		{status: "aborted", want: KernelPollTerminalStateCancelled, ok: true},
 		{status: "running", want: KernelPollTerminalStateUnknown, ok: false},
+		{status: "KernelWorkerStatus.RUNNING", want: KernelPollTerminalStateUnknown, ok: false},
 	}
 
 	for _, tt := range tests {

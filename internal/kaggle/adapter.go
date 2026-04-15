@@ -309,14 +309,14 @@ func unsupportedRequest(detail string) error {
 
 func parseKernelStatusResult(kernelRef string, result Result) (KernelStatusResponse, error) {
 	fields := parseKeyValueOutput(result.Stdout)
-	status := firstNonEmpty(fields["status"], inferStatus(result.Stdout))
+	status := normalizeKernelStatus(firstNonEmpty(fields["status"], inferStatus(result.Stdout)))
 	message := firstNonEmpty(fields["message"], fields["error"])
 	if strings.TrimSpace(status) == "" {
 		return KernelStatusResponse{}, unexpectedOutputError("kernel status", result, "missing status field")
 	}
 	return KernelStatusResponse{
 		KernelRef: kernelRef,
-		Status:    strings.TrimSpace(status),
+		Status:    status,
 		Message:   strings.TrimSpace(message),
 		Raw: KernelStatusRawStatus{
 			Fields:   cloneStringMap(fields),

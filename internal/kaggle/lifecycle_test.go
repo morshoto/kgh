@@ -25,7 +25,7 @@ func TestKernelLifecyclePushStatusAndPollSuccess(t *testing.T) {
 			{
 				args: []string{"kernels", "status", "alice/exp142"},
 				result: Result{
-					Stdout:   "status: running\nmessage: queued for execution\n",
+					Stdout:   "bloodymonday/issue7-e2e has status \"KernelWorkerStatus.RUNNING\"\nmessage: queued for execution\n",
 					Stderr:   "",
 					ExitCode: 0,
 				},
@@ -33,15 +33,7 @@ func TestKernelLifecyclePushStatusAndPollSuccess(t *testing.T) {
 			{
 				args: []string{"kernels", "status", "alice/exp142"},
 				result: Result{
-					Stdout:   "status: running\nmessage: still queued\n",
-					Stderr:   "",
-					ExitCode: 0,
-				},
-			},
-			{
-				args: []string{"kernels", "status", "alice/exp142"},
-				result: Result{
-					Stdout:   "status: complete\nmessage: finished\n",
+					Stdout:   "bloodymonday/issue7-e2e has status \"KernelWorkerStatus.COMPLETE\"\nmessage: finished\n",
 					Stderr:   "",
 					ExitCode: 0,
 				},
@@ -72,7 +64,7 @@ func TestKernelLifecyclePushStatusAndPollSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected status lookup to succeed, got %v", err)
 	}
-	if statusResp.Status != "running" {
+	if statusResp.Status != "RUNNING" {
 		t.Fatalf("unexpected status %q", statusResp.Status)
 	}
 	if statusResp.Message != "queued for execution" {
@@ -89,13 +81,13 @@ func TestKernelLifecyclePushStatusAndPollSuccess(t *testing.T) {
 	if pollResp.Terminal != KernelPollTerminalStateSucceeded {
 		t.Fatalf("unexpected terminal state %q", pollResp.Terminal)
 	}
-	if pollResp.Status != "complete" || pollResp.Message != "finished" {
+	if pollResp.Status != "COMPLETE" || pollResp.Message != "finished" {
 		t.Fatalf("unexpected poll result %+v", pollResp)
 	}
-	if pollResp.Attempts != 2 {
+	if pollResp.Attempts != 1 {
 		t.Fatalf("unexpected attempts %d", pollResp.Attempts)
 	}
-	if !equalDurations(clock.sleeps, []time.Duration{time.Second}) {
+	if len(clock.sleeps) != 0 {
 		t.Fatalf("unexpected sleep schedule %#v", clock.sleeps)
 	}
 }
@@ -163,7 +155,7 @@ func TestKernelLifecyclePollTimeout(t *testing.T) {
 	if timeoutErr.Attempts != 3 {
 		t.Fatalf("unexpected attempts %d", timeoutErr.Attempts)
 	}
-	if timeoutErr.LastStatus != "running" {
+	if timeoutErr.LastStatus != "RUNNING" {
 		t.Fatalf("unexpected last status %q", timeoutErr.LastStatus)
 	}
 }
