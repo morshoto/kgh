@@ -71,12 +71,18 @@ type PollResult struct {
 }
 
 type OutputsResult struct {
-	OutputDir        string           `json:"output_dir"`
-	SubmissionPath   string           `json:"submission_path"`
-	MetricsPath      string           `json:"metrics_path"`
-	Submission       OutputFileResult `json:"submission"`
-	Metrics          OutputFileResult `json:"metrics"`
-	ValidationErrors []string         `json:"validation_errors"`
+	OutputDir      string                  `json:"output_dir"`
+	SubmissionPath string                  `json:"submission_path"`
+	MetricsPath    string                  `json:"metrics_path"`
+	Submission     OutputFileResult        `json:"submission"`
+	Metrics        OutputFileResult        `json:"metrics"`
+	Validation     OutputValidationResult  `json:"validation"`
+}
+
+type OutputValidationResult struct {
+	Valid           bool     `json:"valid"`
+	MissingRequired []string `json:"missing_required"`
+	MissingOptional []string `json:"missing_optional"`
 }
 
 type OutputFileResult struct {
@@ -84,6 +90,8 @@ type OutputFileResult struct {
 	ExpectedPath   string `json:"expected_path"`
 	Path           string `json:"path"`
 	Present        bool   `json:"present"`
+	Required       bool   `json:"required"`
+	Error          string `json:"error"`
 }
 
 type Duration time.Duration
@@ -289,8 +297,8 @@ func buildOutputsResult(execSpec spec.ExecutionSpec, outputDir string) (OutputsR
 		return OutputsResult{}, fmt.Errorf("output dir %q is not a directory", resolvedDir)
 	}
 
-	submission, submissionErr := resolveOutputFile(resolvedDir, execSpec.Outputs.Submission, "submission")
-	metrics, metricsErr := resolveOutputFile(resolvedDir, execSpec.Outputs.Metrics, "metrics")
+	submission := resolveOutputFile(resolvedDir, execSpec.Outputs.Submission, "submission", execSpec.Submit)
+	metrics := resolveOutputFile(resolvedDir, execSpec.Outputs.Metrics, "metrics", false)
 
 	result := OutputsResult{
 		OutputDir:      resolvedDir,
@@ -298,48 +306,69 @@ func buildOutputsResult(execSpec spec.ExecutionSpec, outputDir string) (OutputsR
 		MetricsPath:    metrics.Path,
 		Submission:     submission,
 		Metrics:        metrics,
+		Validation: OutputValidationResult{
+			Valid: true,
+		},
 	}
-	if submissionErr != "" {
-		result.ValidationErrors = append(result.ValidationErrors, submissionErr)
-	}
-	if metricsErr != "" {
-		result.ValidationErrors = append(result.ValidationErrors, metricsErr)
-	}
+
+	applyOutputValidation(&result.Validation, "submission", submission)
+	applyOutputValidation(&result.Validation, "metrics", metrics)
+
 	return result, nil
 }
 
-func resolveOutputFile(outputDir, configuredPath, label string) (OutputFileResult, string) {
+func resolveOutputFile(outputDir, configuredPath, label string, required bool) OutputFileResult {
 	result := OutputFileResult{
 		ConfiguredPath: configuredPath,
+		Required:       required,
 	}
 	if configuredPath == "" {
-		return result, fmt.Sprintf("%s output is not configured", label)
+		result.Error = fmt.Sprintf("%s output is not configured", label)
+		return result
 	}
 
 	expectedPath, err := filepath.Abs(filepath.Join(outputDir, filepath.Clean(configuredPath)))
 	if err != nil {
-		return result, fmt.Sprintf("resolve %s output path %q: %v", label, configuredPath, err)
+		result.Error = fmt.Sprintf("resolve %s output path %q: %v", label, configuredPath, err)
+		return result
 	}
 	result.ExpectedPath = expectedPath
 
 	if !pathWithinBase(outputDir, expectedPath) {
-		return result, fmt.Sprintf("%s output %q resolves outside output dir", label, configuredPath)
+		result.Error = fmt.Sprintf("%s output %q resolves outside output dir", label, configuredPath)
+		return result
 	}
 
 	info, err := os.Stat(expectedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return result, fmt.Sprintf("%s output is missing: %s", label, expectedPath)
+			result.Error = fmt.Sprintf("%s output is missing: %s", label, expectedPath)
+			return result
 		}
-		return result, fmt.Sprintf("stat %s output %q: %v", label, expectedPath, err)
+		result.Error = fmt.Sprintf("stat %s output %q: %v", label, expectedPath, err)
+		return result
 	}
 	if info.IsDir() {
-		return result, fmt.Sprintf("%s output is a directory: %s", label, expectedPath)
+		result.Error = fmt.Sprintf("%s output is a directory: %s", label, expectedPath)
+		return result
 	}
 
 	result.Path = expectedPath
 	result.Present = true
-	return result, ""
+	return result
+}
+
+func applyOutputValidation(validation *OutputValidationResult, name string, result OutputFileResult) {
+	if validation == nil || result.Present {
+		return
+	}
+
+	if result.Required {
+		validation.Valid = false
+		validation.MissingRequired = append(validation.MissingRequired, name)
+		return
+	}
+	validation.MissingOptional = append(validation.MissingOptional, name)
 }
 
 func pathWithinBase(baseDir, target string) bool {
