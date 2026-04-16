@@ -71,12 +71,12 @@ type PollResult struct {
 }
 
 type OutputsResult struct {
-	OutputDir      string                  `json:"output_dir"`
-	SubmissionPath string                  `json:"submission_path"`
-	MetricsPath    string                  `json:"metrics_path"`
-	Submission     OutputFileResult        `json:"submission"`
-	Metrics        OutputFileResult        `json:"metrics"`
-	Validation     OutputValidationResult  `json:"validation"`
+	OutputDir      string                 `json:"output_dir"`
+	SubmissionPath string                 `json:"submission_path"`
+	MetricsPath    string                 `json:"metrics_path"`
+	Submission     OutputFileResult       `json:"submission"`
+	Metrics        OutputFileResult       `json:"metrics"`
+	Validation     OutputValidationResult `json:"validation"`
 }
 
 type OutputValidationResult struct {
