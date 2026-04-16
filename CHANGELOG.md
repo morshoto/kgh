@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.0.7](https://github.com/morshoto/kgh/compare/v0.0.6...v0.0.7) - 2026-04-15
+- Local Kaggle Bundle Staging by @morshoto in https://github.com/morshoto/kgh/pull/47
+- kaggle kernel push by @morshoto in https://github.com/morshoto/kgh/pull/49
+- Canonical Kaggle kernel identity by @morshoto in https://github.com/morshoto/kgh/pull/50
+- Implement kaggle kernels status adapter by @morshoto in https://github.com/morshoto/kgh/pull/51
+- Polling loop timeout backoff by @morshoto in https://github.com/morshoto/kgh/pull/53
+- Polling loop timeout backoff by @morshoto in https://github.com/morshoto/kgh/pull/52
+- Terminal failure timeout states with tests data by @morshoto in https://github.com/morshoto/kgh/pull/54
+- Normalized the CLI around kgh and fixed the repo’s build target by @morshoto in https://github.com/morshoto/kgh/pull/55
+- Issue template by @morshoto in https://github.com/morshoto/kgh/pull/56
+- kgh run command by @morshoto in https://github.com/morshoto/kgh/pull/58
+- Hardening kgh functionality by @morshoto in https://github.com/morshoto/kgh/pull/59
+
 ## [v0.0.6](https://github.com/morshoto/kgh/compare/v0.0.5...v0.0.6) - 2026-04-14
 - Workflow-facing Adapter contract with typed request/response model by @morshoto in https://github.com/morshoto/kgh/pull/40
 - Kaggle auth runtime by @morshoto in https://github.com/morshoto/kgh/pull/42
