@@ -2,13 +2,16 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/shotomorisk/kgh/internal/config"
 	"github.com/shotomorisk/kgh/internal/kaggle"
+	"github.com/shotomorisk/kgh/internal/spec"
 )
 
 func TestRunnerExecuteDryRun(t *testing.T) {
@@ -213,6 +216,15 @@ targets:
 				Terminal:   kaggle.KernelPollTerminalStateSucceeded,
 			}, nil
 		},
+		downloadFn: func(_ context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "submission.csv"), []byte("id,label\n1,0\n"), 0o644); err != nil {
+				t.Fatalf("write submission output: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "metrics.json"), []byte(`{"score":0.5}`), 0o644); err != nil {
+				t.Fatalf("write metrics output: %v", err)
+			}
+			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
+		},
 	}
 
 	runner := NewRunner(adapter)
@@ -239,6 +251,9 @@ targets:
 	if report.Bundle == nil || report.Push == nil || report.Poll == nil {
 		t.Fatalf("expected live report sections to be populated: %+v", report)
 	}
+	if report.Outputs == nil {
+		t.Fatalf("expected live outputs to be populated: %+v", report)
+	}
 	if report.Push.KernelRef != "yourname/exp142" {
 		t.Fatalf("unexpected pushed kernel ref %q", report.Push.KernelRef)
 	}
@@ -254,12 +269,344 @@ targets:
 	if time.Duration(report.PollTimeout) != 15*time.Second {
 		t.Fatalf("unexpected effective poll timeout %s", report.PollTimeout)
 	}
+	if report.Outputs.OutputDir == "" {
+		t.Fatal("expected output dir to be populated")
+	}
+	if !report.Outputs.Submission.Present {
+		t.Fatalf("expected submission output to be present: %+v", report.Outputs.Submission)
+	}
+	if !report.Outputs.Metrics.Present {
+		t.Fatalf("expected metrics output to be present: %+v", report.Outputs.Metrics)
+	}
+	if report.Outputs.SubmissionPath == "" || report.Outputs.MetricsPath == "" {
+		t.Fatalf("expected canonical output paths to be populated: %+v", report.Outputs)
+	}
+	if !report.Outputs.Validation.Valid {
+		t.Fatalf("expected validation to succeed: %+v", report.Outputs.Validation)
+	}
+	if len(report.Outputs.Validation.MissingRequired) != 0 || len(report.Outputs.Validation.MissingOptional) != 0 {
+		t.Fatalf("expected no missing outputs, got %+v", report.Outputs.Validation)
+	}
+	if !report.Outputs.Submission.Required || report.Outputs.Submission.Error != "" {
+		t.Fatalf("expected required submission with no error: %+v", report.Outputs.Submission)
+	}
+	if report.Outputs.Metrics.Required || report.Outputs.Metrics.Error != "" {
+		t.Fatalf("expected optional metrics with no error: %+v", report.Outputs.Metrics)
+	}
+}
+
+func TestRunnerExecuteLiveMissingRequiredSubmissionFailsValidation(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	notebook := filepath.Join(dir, "notebooks", "exp142.ipynb")
+	if err := os.MkdirAll(filepath.Dir(notebook), 0o755); err != nil {
+		t.Fatalf("mkdir notebook dir: %v", err)
+	}
+	if err := os.WriteFile(notebook, []byte(`{"cells":[]}`), 0o644); err != nil {
+		t.Fatalf("write notebook: %v", err)
+	}
+
+	configPath := filepath.Join(dir, ".kgh", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`
+targets:
+  exp142:
+    notebook: `+notebook+`
+    kernel_id: yourname/exp142
+    competition: playground-series-s6e2
+    submit: true
+    resources:
+      private: true
+    outputs:
+      submission: submission.csv
+      metrics: metrics.json
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	adapter := &liveAdapter{
+		t: t,
+		pushFn: func(_ context.Context, _ kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
+			return kaggle.PushKernelResponse{KernelRef: "yourname/exp142"}, nil
+		},
+		pollFn: func(_ context.Context, _ kaggle.KernelPollRequest) (kaggle.KernelPollResult, error) {
+			return kaggle.KernelPollResult{
+				KernelStatusResponse: kaggle.KernelStatusResponse{
+					KernelRef: "yourname/exp142",
+					Status:    "complete",
+				},
+				Terminal: kaggle.KernelPollTerminalStateSucceeded,
+			}, nil
+		},
+		downloadFn: func(_ context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "metrics.json"), []byte(`{"score":0.5}`), 0o644); err != nil {
+				t.Fatalf("write metrics output: %v", err)
+			}
+			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
+		},
+	}
+
+	report, err := NewRunner(adapter).Execute(context.Background(), Request{
+		Target:     "exp142",
+		DryRun:     false,
+		ConfigPath: configPath,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if report.Outputs == nil {
+		t.Fatalf("expected outputs handoff, got %+v", report)
+	}
+	if report.Outputs.Submission.Present {
+		t.Fatalf("expected submission to be missing: %+v", report.Outputs.Submission)
+	}
+	if !report.Outputs.Metrics.Present {
+		t.Fatalf("expected metrics to be present: %+v", report.Outputs.Metrics)
+	}
+	if report.Outputs.SubmissionPath != "" {
+		t.Fatalf("expected empty submission path for missing output, got %q", report.Outputs.SubmissionPath)
+	}
+	if report.Outputs.MetricsPath == "" {
+		t.Fatalf("expected metrics path to be set: %+v", report.Outputs)
+	}
+	if report.Outputs.Validation.Valid {
+		t.Fatalf("expected validation to fail: %+v", report.Outputs.Validation)
+	}
+	if len(report.Outputs.Validation.MissingRequired) != 1 || report.Outputs.Validation.MissingRequired[0] != "submission" {
+		t.Fatalf("expected submission in missing required list, got %+v", report.Outputs.Validation)
+	}
+	if len(report.Outputs.Validation.MissingOptional) != 0 {
+		t.Fatalf("expected no missing optional outputs, got %+v", report.Outputs.Validation)
+	}
+	if report.Outputs.Submission.Error == "" || !strings.Contains(report.Outputs.Submission.Error, "submission output is missing") {
+		t.Fatalf("unexpected submission error %+v", report.Outputs.Submission)
+	}
+}
+
+func TestRunnerExecuteLiveMissingOptionalMetricsDoesNotFailValidation(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	notebook := filepath.Join(dir, "notebooks", "exp142.ipynb")
+	if err := os.MkdirAll(filepath.Dir(notebook), 0o755); err != nil {
+		t.Fatalf("mkdir notebook dir: %v", err)
+	}
+	if err := os.WriteFile(notebook, []byte(`{"cells":[]}`), 0o644); err != nil {
+		t.Fatalf("write notebook: %v", err)
+	}
+
+	configPath := filepath.Join(dir, ".kgh", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`
+targets:
+  exp142:
+    notebook: `+notebook+`
+    kernel_id: yourname/exp142
+    competition: playground-series-s6e2
+    submit: false
+    outputs:
+      submission: submission.csv
+      metrics: metrics.json
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	adapter := &liveAdapter{
+		t: t,
+		pushFn: func(_ context.Context, _ kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
+			return kaggle.PushKernelResponse{KernelRef: "yourname/exp142"}, nil
+		},
+		pollFn: func(_ context.Context, _ kaggle.KernelPollRequest) (kaggle.KernelPollResult, error) {
+			return kaggle.KernelPollResult{
+				KernelStatusResponse: kaggle.KernelStatusResponse{
+					KernelRef: "yourname/exp142",
+					Status:    "complete",
+				},
+				Terminal: kaggle.KernelPollTerminalStateSucceeded,
+			}, nil
+		},
+		downloadFn: func(_ context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "submission.csv"), []byte("id,label\n1,0\n"), 0o644); err != nil {
+				t.Fatalf("write submission output: %v", err)
+			}
+			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
+		},
+	}
+
+	report, err := NewRunner(adapter).Execute(context.Background(), Request{
+		Target:     "exp142",
+		DryRun:     false,
+		ConfigPath: configPath,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if report.Outputs == nil {
+		t.Fatalf("expected outputs handoff, got %+v", report)
+	}
+	if !report.Outputs.Validation.Valid {
+		t.Fatalf("expected validation to succeed for optional metrics: %+v", report.Outputs.Validation)
+	}
+	if len(report.Outputs.Validation.MissingRequired) != 0 {
+		t.Fatalf("expected no missing required outputs, got %+v", report.Outputs.Validation)
+	}
+	if len(report.Outputs.Validation.MissingOptional) != 1 || report.Outputs.Validation.MissingOptional[0] != "metrics" {
+		t.Fatalf("expected metrics in missing optional list, got %+v", report.Outputs.Validation)
+	}
+	if report.Outputs.Metrics.Required {
+		t.Fatalf("expected metrics to remain optional: %+v", report.Outputs.Metrics)
+	}
+	if report.Outputs.Metrics.Error == "" || !strings.Contains(report.Outputs.Metrics.Error, "metrics output is missing") {
+		t.Fatalf("unexpected metrics error %+v", report.Outputs.Metrics)
+	}
+}
+
+func TestRunnerExecuteLiveMissingSubmissionIsOptionalWhenSubmitDisabled(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	notebook := filepath.Join(dir, "notebooks", "exp142.ipynb")
+	if err := os.MkdirAll(filepath.Dir(notebook), 0o755); err != nil {
+		t.Fatalf("mkdir notebook dir: %v", err)
+	}
+	if err := os.WriteFile(notebook, []byte(`{"cells":[]}`), 0o644); err != nil {
+		t.Fatalf("write notebook: %v", err)
+	}
+
+	configPath := filepath.Join(dir, ".kgh", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`
+targets:
+  exp142:
+    notebook: `+notebook+`
+    kernel_id: yourname/exp142
+    competition: playground-series-s6e2
+    submit: false
+    outputs:
+      submission: submission.csv
+      metrics: metrics.json
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	adapter := &liveAdapter{
+		t: t,
+		pushFn: func(_ context.Context, _ kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
+			return kaggle.PushKernelResponse{KernelRef: "yourname/exp142"}, nil
+		},
+		pollFn: func(_ context.Context, _ kaggle.KernelPollRequest) (kaggle.KernelPollResult, error) {
+			return kaggle.KernelPollResult{
+				KernelStatusResponse: kaggle.KernelStatusResponse{
+					KernelRef: "yourname/exp142",
+					Status:    "complete",
+				},
+				Terminal: kaggle.KernelPollTerminalStateSucceeded,
+			}, nil
+		},
+		downloadFn: func(_ context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "metrics.json"), []byte(`{"score":0.5}`), 0o644); err != nil {
+				t.Fatalf("write metrics output: %v", err)
+			}
+			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
+		},
+	}
+
+	report, err := NewRunner(adapter).Execute(context.Background(), Request{
+		Target:     "exp142",
+		DryRun:     false,
+		ConfigPath: configPath,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if report.Outputs == nil {
+		t.Fatalf("expected outputs handoff, got %+v", report)
+	}
+	if !report.Outputs.Validation.Valid {
+		t.Fatalf("expected validation to succeed for optional submission: %+v", report.Outputs.Validation)
+	}
+	if report.Outputs.Submission.Required {
+		t.Fatalf("expected submission to be optional when submit=false: %+v", report.Outputs.Submission)
+	}
+	if len(report.Outputs.Validation.MissingOptional) != 1 || report.Outputs.Validation.MissingOptional[0] != "submission" {
+		t.Fatalf("expected submission in missing optional list, got %+v", report.Outputs.Validation)
+	}
+	if report.Outputs.Submission.Error == "" || !strings.Contains(report.Outputs.Submission.Error, "submission output is missing") {
+		t.Fatalf("unexpected submission error %+v", report.Outputs.Submission)
+	}
+}
+
+func TestBuildOutputsResultDeterministicJSON(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outputDir, "submission.csv"), []byte("id,label\n1,0\n"), 0o644); err != nil {
+		t.Fatalf("write submission output: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "metrics.json"), []byte(`{"score":0.5}`), 0o644); err != nil {
+		t.Fatalf("write metrics output: %v", err)
+	}
+
+	execSpec := testExecutionSpec()
+	first, err := buildOutputsResult(execSpec, outputDir)
+	if err != nil {
+		t.Fatalf("build outputs result: %v", err)
+	}
+	second, err := buildOutputsResult(execSpec, outputDir)
+	if err != nil {
+		t.Fatalf("build outputs result: %v", err)
+	}
+
+	firstJSON, err := json.Marshal(first)
+	if err != nil {
+		t.Fatalf("marshal first outputs result: %v", err)
+	}
+	secondJSON, err := json.Marshal(second)
+	if err != nil {
+		t.Fatalf("marshal second outputs result: %v", err)
+	}
+	if string(firstJSON) != string(secondJSON) {
+		t.Fatalf("expected deterministic outputs json, got %q and %q", string(firstJSON), string(secondJSON))
+	}
+}
+
+func TestBuildOutputsResultRejectsEscapingPaths(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	execSpec := testExecutionSpec()
+	execSpec.Outputs.Submission = "../submission.csv"
+
+	result, err := buildOutputsResult(execSpec, outputDir)
+	if err != nil {
+		t.Fatalf("build outputs result: %v", err)
+	}
+	if result.Submission.Present {
+		t.Fatalf("expected escaping submission path to be rejected: %+v", result.Submission)
+	}
+	if result.Validation.Valid {
+		t.Fatalf("expected validation to fail, got %+v", result.Validation)
+	}
+	if len(result.Validation.MissingRequired) != 1 || result.Validation.MissingRequired[0] != "submission" {
+		t.Fatalf("expected submission in missing required list, got %+v", result.Validation)
+	}
+	if got := result.Submission.Error; !strings.Contains(got, "resolves outside output dir") {
+		t.Fatalf("unexpected submission error %q", got)
+	}
 }
 
 type liveAdapter struct {
-	t      *testing.T
-	pushFn func(context.Context, kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error)
-	pollFn func(context.Context, kaggle.KernelPollRequest) (kaggle.KernelPollResult, error)
+	t          *testing.T
+	pushFn     func(context.Context, kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error)
+	pollFn     func(context.Context, kaggle.KernelPollRequest) (kaggle.KernelPollResult, error)
+	downloadFn func(context.Context, kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error)
 }
 
 func (a *liveAdapter) PushKernel(ctx context.Context, req kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
@@ -274,4 +621,21 @@ func (a *liveAdapter) PollKernelStatus(ctx context.Context, req kaggle.KernelPol
 		a.t.Fatal("pollFn must be set")
 	}
 	return a.pollFn(ctx, req)
+}
+
+func (a *liveAdapter) DownloadKernelOutput(ctx context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+	if a.downloadFn == nil {
+		a.t.Fatal("downloadFn must be set")
+	}
+	return a.downloadFn(ctx, req)
+}
+
+func testExecutionSpec() spec.ExecutionSpec {
+	return spec.ExecutionSpec{
+		Submit: true,
+		Outputs: config.Outputs{
+			Submission: "submission.csv",
+			Metrics:    "metrics.json",
+		},
+	}
 }

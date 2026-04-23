@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/shotomorisk/kgh/internal/config"
@@ -40,6 +42,7 @@ type Result struct {
 	Bundle       *BundleResult      `json:"bundle,omitempty"`
 	Push         *PushResult        `json:"push,omitempty"`
 	Poll         *PollResult        `json:"poll,omitempty"`
+	Outputs      *OutputsResult     `json:"outputs,omitempty"`
 }
 
 type BundleResult struct {
@@ -67,6 +70,30 @@ type PollResult struct {
 	Raw        kaggle.KernelStatusRawStatus   `json:"raw,omitempty"`
 }
 
+type OutputsResult struct {
+	OutputDir      string                 `json:"output_dir"`
+	SubmissionPath string                 `json:"submission_path"`
+	MetricsPath    string                 `json:"metrics_path"`
+	Submission     OutputFileResult       `json:"submission"`
+	Metrics        OutputFileResult       `json:"metrics"`
+	Validation     OutputValidationResult `json:"validation"`
+}
+
+type OutputValidationResult struct {
+	Valid           bool     `json:"valid"`
+	MissingRequired []string `json:"missing_required"`
+	MissingOptional []string `json:"missing_optional"`
+}
+
+type OutputFileResult struct {
+	ConfiguredPath string `json:"configured_path"`
+	ExpectedPath   string `json:"expected_path"`
+	Path           string `json:"path"`
+	Present        bool   `json:"present"`
+	Required       bool   `json:"required"`
+	Error          string `json:"error"`
+}
+
 type Duration time.Duration
 
 func (d Duration) String() string {
@@ -80,6 +107,7 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 type Adapter interface {
 	PushKernel(context.Context, kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error)
 	PollKernelStatus(context.Context, kaggle.KernelPollRequest) (kaggle.KernelPollResult, error)
+	DownloadKernelOutput(context.Context, kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error)
 }
 
 type Runner struct {
@@ -199,6 +227,25 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		Raw:        pollResp.KernelStatusResponse.Raw,
 	}
 
+	outputDir, err := createOutputDir()
+	if err != nil {
+		return report, fmt.Errorf("create output dir: %w", err)
+	}
+
+	downloadResp, err := r.adapter.DownloadKernelOutput(ctx, kaggle.DownloadKernelOutputRequest{
+		KernelRef: pushResp.KernelRef,
+		OutputDir: outputDir,
+	})
+	if err != nil {
+		return report, fmt.Errorf("download kaggle output: %w", err)
+	}
+
+	outputs, err := buildOutputsResult(execSpec, downloadResp.OutputDir)
+	if err != nil {
+		return report, fmt.Errorf("build output handoff: %w", err)
+	}
+	report.Outputs = &outputs
+
 	return report, nil
 }
 
@@ -220,4 +267,114 @@ func effectivePollTimeout(requested, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return 30 * time.Minute
+}
+
+const outputTempPrefix = "kgh-kernel-output-*"
+
+func createOutputDir() (string, error) {
+	outputDir, err := os.MkdirTemp("", outputTempPrefix)
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chmod(outputDir, 0o700); err != nil {
+		_ = os.RemoveAll(outputDir)
+		return "", err
+	}
+	return outputDir, nil
+}
+
+func buildOutputsResult(execSpec spec.ExecutionSpec, outputDir string) (OutputsResult, error) {
+	resolvedDir, err := filepath.Abs(filepath.Clean(outputDir))
+	if err != nil {
+		return OutputsResult{}, err
+	}
+
+	info, err := os.Stat(resolvedDir)
+	if err != nil {
+		return OutputsResult{}, err
+	}
+	if !info.IsDir() {
+		return OutputsResult{}, fmt.Errorf("output dir %q is not a directory", resolvedDir)
+	}
+
+	submission := resolveOutputFile(resolvedDir, execSpec.Outputs.Submission, "submission", execSpec.Submit)
+	metrics := resolveOutputFile(resolvedDir, execSpec.Outputs.Metrics, "metrics", false)
+
+	result := OutputsResult{
+		OutputDir:      resolvedDir,
+		SubmissionPath: submission.Path,
+		MetricsPath:    metrics.Path,
+		Submission:     submission,
+		Metrics:        metrics,
+		Validation: OutputValidationResult{
+			Valid: true,
+		},
+	}
+
+	applyOutputValidation(&result.Validation, "submission", submission)
+	applyOutputValidation(&result.Validation, "metrics", metrics)
+
+	return result, nil
+}
+
+func resolveOutputFile(outputDir, configuredPath, label string, required bool) OutputFileResult {
+	result := OutputFileResult{
+		ConfiguredPath: configuredPath,
+		Required:       required,
+	}
+	if configuredPath == "" {
+		result.Error = fmt.Sprintf("%s output is not configured", label)
+		return result
+	}
+
+	expectedPath, err := filepath.Abs(filepath.Join(outputDir, filepath.Clean(configuredPath)))
+	if err != nil {
+		result.Error = fmt.Sprintf("resolve %s output path %q: %v", label, configuredPath, err)
+		return result
+	}
+	result.ExpectedPath = expectedPath
+
+	if !pathWithinBase(outputDir, expectedPath) {
+		result.Error = fmt.Sprintf("%s output %q resolves outside output dir", label, configuredPath)
+		return result
+	}
+
+	info, err := os.Stat(expectedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			result.Error = fmt.Sprintf("%s output is missing: %s", label, expectedPath)
+			return result
+		}
+		result.Error = fmt.Sprintf("stat %s output %q: %v", label, expectedPath, err)
+		return result
+	}
+	if info.IsDir() {
+		result.Error = fmt.Sprintf("%s output is a directory: %s", label, expectedPath)
+		return result
+	}
+
+	result.Path = expectedPath
+	result.Present = true
+	return result
+}
+
+func applyOutputValidation(validation *OutputValidationResult, name string, result OutputFileResult) {
+	if validation == nil || result.Present {
+		return
+	}
+
+	if result.Required {
+		validation.Valid = false
+		validation.MissingRequired = append(validation.MissingRequired, name)
+		return
+	}
+	validation.MissingOptional = append(validation.MissingOptional, name)
+}
+
+func pathWithinBase(baseDir, target string) bool {
+	rel, err := filepath.Rel(baseDir, target)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && rel != "." && filepath.Dir(rel) != ".." && rel != ""
 }
