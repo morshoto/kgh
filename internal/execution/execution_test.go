@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,11 +226,45 @@ targets:
 			}
 			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
 		},
+		submitFn: func(_ context.Context, req kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+			if req.Competition != "playground-series-s6e2" {
+				t.Fatalf("unexpected submit competition %q", req.Competition)
+			}
+			if filepath.Base(req.FilePath) != "submission.csv" {
+				t.Fatalf("unexpected submit file path %q", req.FilePath)
+			}
+			if req.Message != "kgh submit target=exp142 kernel=yourname/exp142" {
+				t.Fatalf("unexpected submit message %q", req.Message)
+			}
+			return kaggle.CompetitionSubmitResponse{
+				Competition: req.Competition,
+				Submitted:   true,
+			}, nil
+		},
+		listFn: func(_ context.Context, req kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error) {
+			if req.Competition != "playground-series-s6e2" {
+				t.Fatalf("unexpected list competition %q", req.Competition)
+			}
+			return kaggle.CompetitionSubmissionsResponse{
+				Submissions: []kaggle.CompetitionSubmission{
+					{
+						FileName:    "submission.csv",
+						Description: "kgh submit target=exp142 kernel=yourname/exp142",
+						Status:      "complete",
+						PublicScore: "0.12345",
+						SubmittedAt: time.Date(2026, 4, 24, 12, 0, 1, 0, time.UTC),
+					},
+				},
+			}, nil
+		},
 	}
 
 	runner := NewRunner(adapter)
 	runner.pollTimeout = 10 * time.Second
 	runner.pollInterval = time.Second
+	runner.now = func() time.Time {
+		return time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)
+	}
 
 	report, err := runner.Execute(context.Background(), Request{
 		Target:       "exp142",
@@ -292,6 +327,27 @@ targets:
 	}
 	if report.Outputs.Metrics.Required || report.Outputs.Metrics.Error != "" {
 		t.Fatalf("expected optional metrics with no error: %+v", report.Outputs.Metrics)
+	}
+	if report.Submission == nil {
+		t.Fatalf("expected submission result, got %+v", report)
+	}
+	if !report.Submission.Attempted || !report.Submission.Submitted {
+		t.Fatalf("expected successful submission result, got %+v", report.Submission)
+	}
+	if report.Submission.Message != "kgh submit target=exp142 kernel=yourname/exp142" {
+		t.Fatalf("unexpected submission message %q", report.Submission.Message)
+	}
+	if report.Submission.FileName != "submission.csv" {
+		t.Fatalf("unexpected submission file name %q", report.Submission.FileName)
+	}
+	if report.Score == nil {
+		t.Fatalf("expected score result, got %+v", report)
+	}
+	if report.Score.State != ScoreStateReady {
+		t.Fatalf("unexpected score state %+v", report.Score)
+	}
+	if report.Score.PublicScore != "0.12345" || report.Score.Status != "complete" {
+		t.Fatalf("unexpected score result %+v", report.Score)
 	}
 }
 
@@ -464,6 +520,9 @@ targets:
 	if report.Outputs.Metrics.Error == "" || !strings.Contains(report.Outputs.Metrics.Error, "metrics output is missing") {
 		t.Fatalf("unexpected metrics error %+v", report.Outputs.Metrics)
 	}
+	if report.Submission != nil || report.Score != nil {
+		t.Fatalf("expected submission and score to be skipped when submit=false, got %+v %+v", report.Submission, report.Score)
+	}
 }
 
 func TestRunnerExecuteLiveMissingSubmissionIsOptionalWhenSubmitDisabled(t *testing.T) {
@@ -541,6 +600,202 @@ targets:
 	if report.Outputs.Submission.Error == "" || !strings.Contains(report.Outputs.Submission.Error, "submission output is missing") {
 		t.Fatalf("unexpected submission error %+v", report.Outputs.Submission)
 	}
+	if report.Submission != nil || report.Score != nil {
+		t.Fatalf("expected submission and score to be skipped when submit=false, got %+v %+v", report.Submission, report.Score)
+	}
+}
+
+func TestRunnerExecuteLiveScorePendingWhenMatchedSubmissionHasNoScore(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeLiveConfig(t, true)
+
+	adapter := &liveAdapter{
+		t: t,
+		pushFn: func(_ context.Context, _ kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
+			return kaggle.PushKernelResponse{KernelRef: "yourname/exp142"}, nil
+		},
+		pollFn: func(_ context.Context, _ kaggle.KernelPollRequest) (kaggle.KernelPollResult, error) {
+			return kaggle.KernelPollResult{
+				KernelStatusResponse: kaggle.KernelStatusResponse{KernelRef: "yourname/exp142", Status: "complete"},
+				Terminal:             kaggle.KernelPollTerminalStateSucceeded,
+			}, nil
+		},
+		downloadFn: func(_ context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "submission.csv"), []byte("id,label\n1,0\n"), 0o644); err != nil {
+				t.Fatalf("write submission output: %v", err)
+			}
+			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
+		},
+		submitFn: func(_ context.Context, req kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+			return kaggle.CompetitionSubmitResponse{Competition: req.Competition, Submitted: true}, nil
+		},
+		listFn: func(_ context.Context, _ kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error) {
+			return kaggle.CompetitionSubmissionsResponse{
+				Submissions: []kaggle.CompetitionSubmission{{
+					FileName:    "submission.csv",
+					Description: "kgh submit target=exp142 kernel=yourname/exp142",
+					Status:      "pending",
+					SubmittedAt: time.Date(2026, 4, 24, 12, 0, 1, 0, time.UTC),
+				}},
+			}, nil
+		},
+	}
+
+	runner := NewRunner(adapter)
+	runner.now = func() time.Time { return time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC) }
+
+	report, err := runner.Execute(context.Background(), Request{
+		Target:     "exp142",
+		DryRun:     false,
+		ConfigPath: configPath,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if report.Score == nil || report.Score.State != ScoreStatePending {
+		t.Fatalf("expected pending score result, got %+v", report.Score)
+	}
+	if report.Score.PublicScore != "" || report.Score.Status != "pending" {
+		t.Fatalf("unexpected pending score result %+v", report.Score)
+	}
+}
+
+func TestRunnerExecuteLiveScoreNotFoundWhenNoSubmissionMatchesCurrentRun(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeLiveConfig(t, true)
+
+	adapter := &liveAdapter{
+		t: t,
+		pushFn: func(_ context.Context, _ kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
+			return kaggle.PushKernelResponse{KernelRef: "yourname/exp142"}, nil
+		},
+		pollFn: func(_ context.Context, _ kaggle.KernelPollRequest) (kaggle.KernelPollResult, error) {
+			return kaggle.KernelPollResult{
+				KernelStatusResponse: kaggle.KernelStatusResponse{KernelRef: "yourname/exp142", Status: "complete"},
+				Terminal:             kaggle.KernelPollTerminalStateSucceeded,
+			}, nil
+		},
+		downloadFn: func(_ context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "submission.csv"), []byte("id,label\n1,0\n"), 0o644); err != nil {
+				t.Fatalf("write submission output: %v", err)
+			}
+			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
+		},
+		submitFn: func(_ context.Context, req kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+			return kaggle.CompetitionSubmitResponse{Competition: req.Competition, Submitted: true}, nil
+		},
+		listFn: func(_ context.Context, _ kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error) {
+			return kaggle.CompetitionSubmissionsResponse{
+				Submissions: []kaggle.CompetitionSubmission{{
+					FileName:    "other.csv",
+					Description: "kgh submit target=exp142 kernel=yourname/exp142",
+					Status:      "complete",
+					PublicScore: "0.99999",
+					SubmittedAt: time.Date(2026, 4, 24, 12, 0, 1, 0, time.UTC),
+				}},
+			}, nil
+		},
+	}
+
+	runner := NewRunner(adapter)
+	runner.now = func() time.Time { return time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC) }
+
+	report, err := runner.Execute(context.Background(), Request{
+		Target:     "exp142",
+		DryRun:     false,
+		ConfigPath: configPath,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if report.Score == nil || report.Score.State != ScoreStateNotFound {
+		t.Fatalf("expected not_found score result, got %+v", report.Score)
+	}
+}
+
+func TestRunnerExecuteLiveSubmitFailureReturnsError(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeLiveConfig(t, true)
+
+	adapter := &liveAdapter{
+		t: t,
+		pushFn: func(_ context.Context, _ kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
+			return kaggle.PushKernelResponse{KernelRef: "yourname/exp142"}, nil
+		},
+		pollFn: func(_ context.Context, _ kaggle.KernelPollRequest) (kaggle.KernelPollResult, error) {
+			return kaggle.KernelPollResult{
+				KernelStatusResponse: kaggle.KernelStatusResponse{KernelRef: "yourname/exp142", Status: "complete"},
+				Terminal:             kaggle.KernelPollTerminalStateSucceeded,
+			}, nil
+		},
+		downloadFn: func(_ context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "submission.csv"), []byte("id,label\n1,0\n"), 0o644); err != nil {
+				t.Fatalf("write submission output: %v", err)
+			}
+			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
+		},
+		submitFn: func(_ context.Context, _ kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+			return kaggle.CompetitionSubmitResponse{}, fmt.Errorf("submit failed")
+		},
+	}
+
+	_, err := NewRunner(adapter).Execute(context.Background(), Request{
+		Target:     "exp142",
+		DryRun:     false,
+		ConfigPath: configPath,
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "submit kaggle competition") {
+		t.Fatalf("unexpected error %q", err)
+	}
+}
+
+func TestRunnerExecuteLiveListSubmissionsFailureReturnsError(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeLiveConfig(t, true)
+
+	adapter := &liveAdapter{
+		t: t,
+		pushFn: func(_ context.Context, _ kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
+			return kaggle.PushKernelResponse{KernelRef: "yourname/exp142"}, nil
+		},
+		pollFn: func(_ context.Context, _ kaggle.KernelPollRequest) (kaggle.KernelPollResult, error) {
+			return kaggle.KernelPollResult{
+				KernelStatusResponse: kaggle.KernelStatusResponse{KernelRef: "yourname/exp142", Status: "complete"},
+				Terminal:             kaggle.KernelPollTerminalStateSucceeded,
+			}, nil
+		},
+		downloadFn: func(_ context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "submission.csv"), []byte("id,label\n1,0\n"), 0o644); err != nil {
+				t.Fatalf("write submission output: %v", err)
+			}
+			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
+		},
+		submitFn: func(_ context.Context, req kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+			return kaggle.CompetitionSubmitResponse{Competition: req.Competition, Submitted: true}, nil
+		},
+		listFn: func(_ context.Context, _ kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error) {
+			return kaggle.CompetitionSubmissionsResponse{}, fmt.Errorf("list failed")
+		},
+	}
+
+	_, err := NewRunner(adapter).Execute(context.Background(), Request{
+		Target:     "exp142",
+		DryRun:     false,
+		ConfigPath: configPath,
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "list kaggle competition submissions") {
+		t.Fatalf("unexpected error %q", err)
+	}
 }
 
 func TestBuildOutputsResultDeterministicJSON(t *testing.T) {
@@ -607,6 +862,8 @@ type liveAdapter struct {
 	pushFn     func(context.Context, kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error)
 	pollFn     func(context.Context, kaggle.KernelPollRequest) (kaggle.KernelPollResult, error)
 	downloadFn func(context.Context, kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error)
+	submitFn   func(context.Context, kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error)
+	listFn     func(context.Context, kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error)
 }
 
 func (a *liveAdapter) PushKernel(ctx context.Context, req kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
@@ -630,12 +887,65 @@ func (a *liveAdapter) DownloadKernelOutput(ctx context.Context, req kaggle.Downl
 	return a.downloadFn(ctx, req)
 }
 
+func (a *liveAdapter) SubmitCompetition(ctx context.Context, req kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+	if a.submitFn == nil {
+		a.t.Fatal("submitFn must be set")
+	}
+	return a.submitFn(ctx, req)
+}
+
+func (a *liveAdapter) ListCompetitionSubmissions(ctx context.Context, req kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error) {
+	if a.listFn == nil {
+		a.t.Fatal("listFn must be set")
+	}
+	return a.listFn(ctx, req)
+}
+
 func testExecutionSpec() spec.ExecutionSpec {
 	return spec.ExecutionSpec{
-		Submit: true,
+		TargetName:  "exp142",
+		Competition: "playground-series-s6e2",
+		Submit:      true,
 		Outputs: config.Outputs{
 			Submission: "submission.csv",
 			Metrics:    "metrics.json",
 		},
 	}
+}
+
+func writeLiveConfig(t *testing.T, submit bool) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	notebook := filepath.Join(dir, "notebooks", "exp142.ipynb")
+	if err := os.MkdirAll(filepath.Dir(notebook), 0o755); err != nil {
+		t.Fatalf("mkdir notebook dir: %v", err)
+	}
+	if err := os.WriteFile(notebook, []byte(`{"cells":[]}`), 0o644); err != nil {
+		t.Fatalf("write notebook: %v", err)
+	}
+
+	configPath := filepath.Join(dir, ".kgh", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	submitValue := "false"
+	if submit {
+		submitValue = "true"
+	}
+	if err := os.WriteFile(configPath, []byte(`
+targets:
+  exp142:
+    notebook: `+notebook+`
+    kernel_id: yourname/exp142
+    competition: playground-series-s6e2
+    submit: `+submitValue+`
+    outputs:
+      submission: submission.csv
+      metrics: metrics.json
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	return configPath
 }
