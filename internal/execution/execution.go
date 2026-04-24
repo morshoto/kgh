@@ -43,6 +43,7 @@ type Result struct {
 	Push         *PushResult        `json:"push,omitempty"`
 	Poll         *PollResult        `json:"poll,omitempty"`
 	Outputs      *OutputsResult     `json:"outputs,omitempty"`
+	Submission   *SubmissionResult  `json:"submission,omitempty"`
 }
 
 type BundleResult struct {
@@ -79,6 +80,16 @@ type OutputsResult struct {
 	Validation     OutputValidationResult `json:"validation"`
 }
 
+type SubmissionResult struct {
+	Enabled     bool   `json:"enabled"`
+	Skipped     bool   `json:"skipped"`
+	Competition string `json:"competition,omitempty"`
+	FilePath    string `json:"file_path,omitempty"`
+	Message     string `json:"message,omitempty"`
+	Submitted   bool   `json:"submitted"`
+	Reason      string `json:"reason,omitempty"`
+}
+
 type OutputValidationResult struct {
 	Valid           bool     `json:"valid"`
 	MissingRequired []string `json:"missing_required"`
@@ -108,6 +119,7 @@ type Adapter interface {
 	PushKernel(context.Context, kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error)
 	PollKernelStatus(context.Context, kaggle.KernelPollRequest) (kaggle.KernelPollResult, error)
 	DownloadKernelOutput(context.Context, kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error)
+	SubmitCompetition(context.Context, kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error)
 }
 
 type Runner struct {
@@ -246,7 +258,48 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 	}
 	report.Outputs = &outputs
 
+	submission, err := r.submitOutputs(ctx, execSpec, pushResp.KernelRef, outputs)
+	report.Submission = &submission
+	if err != nil {
+		return report, err
+	}
+
 	return report, nil
+}
+
+func (r *Runner) submitOutputs(ctx context.Context, execSpec spec.ExecutionSpec, kernelRef string, outputs OutputsResult) (SubmissionResult, error) {
+	if !execSpec.Submit {
+		return SubmissionResult{
+			Enabled:     false,
+			Skipped:     true,
+			Competition: execSpec.Competition,
+			Reason:      "submission disabled for target",
+		}, nil
+	}
+
+	result := SubmissionResult{
+		Enabled:     true,
+		Competition: execSpec.Competition,
+		FilePath:    outputs.Submission.Path,
+		Message:     submissionMessage(execSpec.TargetName, kernelRef),
+	}
+	if !outputs.Submission.Present {
+		result.Reason = outputs.Submission.Error
+		return result, fmt.Errorf("submit enabled but submission artifact is missing: %s", outputs.Submission.Error)
+	}
+
+	resp, err := r.adapter.SubmitCompetition(ctx, kaggle.CompetitionSubmitRequest{
+		Competition: execSpec.Competition,
+		FilePath:    outputs.Submission.Path,
+		Message:     result.Message,
+	})
+	if err != nil {
+		return result, fmt.Errorf("submit kaggle competition: %w", err)
+	}
+
+	result.Competition = resp.Competition
+	result.Submitted = resp.Submitted
+	return result, nil
 }
 
 func effectivePollInterval(requested, fallback time.Duration) time.Duration {
@@ -267,6 +320,10 @@ func effectivePollTimeout(requested, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return 30 * time.Minute
+}
+
+func submissionMessage(targetName, kernelRef string) string {
+	return fmt.Sprintf("kgh target=%s kernel=%s", targetName, kernelRef)
 }
 
 const outputTempPrefix = "kgh-kernel-output-*"
