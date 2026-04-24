@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.8](https://github.com/morshoto/kgh/compare/v0.0.7...v0.0.8) - 2026-04-24
+- kaggle submission validation by @morshoto in https://github.com/morshoto/kgh/pull/60
+- chore: refine dependabot ecosystems by @morshoto in https://github.com/morshoto/kgh/pull/70
+
 ## [v0.0.7](https://github.com/morshoto/kgh/compare/v0.0.6...v0.0.7) - 2026-04-15
 - Local Kaggle Bundle Staging by @morshoto in https://github.com/morshoto/kgh/pull/47
 - kaggle kernel push by @morshoto in https://github.com/morshoto/kgh/pull/49
