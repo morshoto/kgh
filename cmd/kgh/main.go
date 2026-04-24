@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/shotomorisk/kgh/internal/execution"
+	ghctx "github.com/shotomorisk/kgh/internal/github"
+	"github.com/shotomorisk/kgh/internal/parser"
 )
 
 var version = "dev"
@@ -45,6 +47,12 @@ func runWithIO(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 		}
 		return code
+	case "github":
+		code, err := githubCommand(context.Background(), args[1:], stdout, stderr)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+		}
+		return code
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n\n", args[0])
 		printUsage(stderr)
@@ -52,13 +60,21 @@ func runWithIO(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-type runFlags struct {
-	target       string
+type sharedRunFlags struct {
 	dryRun       bool
-	gpu          *bool
-	internet     *bool
 	pollInterval time.Duration
 	timeout      time.Duration
+}
+
+type runFlags struct {
+	target   string
+	gpu      *bool
+	internet *bool
+	sharedRunFlags
+}
+
+type githubRunFlags struct {
+	sharedRunFlags
 }
 
 func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
@@ -67,8 +83,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (i
 		return 1, err
 	}
 
-	runner := execution.NewRunner(nil)
-	report, err := runner.Execute(ctx, execution.Request{
+	return executeRequest(ctx, execution.Request{
 		Target:       flags.target,
 		DryRun:       flags.dryRun,
 		GPU:          flags.gpu,
@@ -76,7 +91,40 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (i
 		ConfigPath:   execution.DefaultConfigPath,
 		PollInterval: flags.pollInterval,
 		PollTimeout:  flags.timeout,
-	})
+	}, stdout)
+}
+
+func githubCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
+	if len(args) == 0 {
+		printGitHubUsage(stdout)
+		return 0, nil
+	}
+
+	switch args[0] {
+	case "help", "--help", "-h":
+		printGitHubUsage(stdout)
+		return 0, nil
+	case "run":
+	default:
+		return 1, fmt.Errorf("unknown github subcommand: %s", args[0])
+	}
+
+	flags, err := parseGitHubRunFlags(args[1:])
+	if err != nil {
+		return 1, err
+	}
+
+	trigger, err := ghctx.NewTriggerResolver().Resolve(ctx)
+	if err != nil {
+		return 1, err
+	}
+
+	return executeRequest(ctx, requestFromTrigger(trigger, flags.sharedRunFlags), stdout)
+}
+
+func executeRequest(ctx context.Context, req execution.Request, stdout io.Writer) (int, error) {
+	runner := execution.NewRunner(nil)
+	report, err := runner.Execute(ctx, req)
 	if err != nil {
 		return 1, err
 	}
@@ -125,16 +173,57 @@ func parseRunFlags(args []string) (runFlags, error) {
 	if len(fs.Args()) != 0 {
 		return runFlags{}, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
-	if flags.pollInterval < 0 {
-		return runFlags{}, fmt.Errorf("--poll-interval must be greater than or equal to 0")
-	}
-	if flags.timeout < 0 {
-		return runFlags{}, fmt.Errorf("--timeout must be greater than or equal to 0")
+	if err := validateSharedRunFlags(flags.sharedRunFlags); err != nil {
+		return runFlags{}, err
 	}
 	if strings.TrimSpace(flags.target) == "" {
 		return runFlags{}, fmt.Errorf("--target is required")
 	}
 	return flags, nil
+}
+
+func parseGitHubRunFlags(args []string) (githubRunFlags, error) {
+	fs := flag.NewFlagSet("github run", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	var flags githubRunFlags
+
+	fs.BoolVar(&flags.dryRun, "dry-run", true, "print resolved execution JSON without invoking Kaggle")
+	fs.DurationVar(&flags.pollInterval, "poll-interval", 0, "poll interval for live Kaggle status checks")
+	fs.DurationVar(&flags.timeout, "timeout", 0, "timeout for live Kaggle polling")
+
+	if err := fs.Parse(args); err != nil {
+		return githubRunFlags{}, err
+	}
+	if len(fs.Args()) != 0 {
+		return githubRunFlags{}, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if err := validateSharedRunFlags(flags.sharedRunFlags); err != nil {
+		return githubRunFlags{}, err
+	}
+	return flags, nil
+}
+
+func validateSharedRunFlags(flags sharedRunFlags) error {
+	if flags.pollInterval < 0 {
+		return fmt.Errorf("--poll-interval must be greater than or equal to 0")
+	}
+	if flags.timeout < 0 {
+		return fmt.Errorf("--timeout must be greater than or equal to 0")
+	}
+	return nil
+}
+
+func requestFromTrigger(trigger parser.Trigger, flags sharedRunFlags) execution.Request {
+	return execution.Request{
+		Target:       trigger.Target,
+		DryRun:       flags.dryRun,
+		GPU:          trigger.GPU,
+		Internet:     trigger.Internet,
+		ConfigPath:   execution.DefaultConfigPath,
+		PollInterval: flags.pollInterval,
+		PollTimeout:  flags.timeout,
+	}
 }
 
 func boolPtr(v bool) *bool {
@@ -150,13 +239,34 @@ Usage:
 Available Commands:
   version   Print the current kgh version
   help      Show this help message
+  github    Resolve and execute from GitHub commit metadata
   run       Resolve and execute a Kaggle target
 
 Examples:
   kgh run --target exp142
   kgh run --target exp142 --poll-interval=2s --timeout=5m
   kgh run --target exp142 --dry-run=false
+  kgh github run
   kgh version
+`)
+}
+
+func printGitHubUsage(w io.Writer) {
+	fmt.Fprint(w, `kgh github resolves trigger intent from GitHub commit metadata.
+
+Usage:
+  kgh github run [flags]
+
+Flags:
+  --dry-run         print resolved execution JSON without invoking Kaggle (default true)
+  --poll-interval   poll interval for live Kaggle status checks
+  --timeout         timeout for live Kaggle polling
+
+Environment:
+  GITHUB_EVENT_NAME   GitHub Actions event name
+  GITHUB_EVENT_PATH   path to the GitHub event payload JSON
+  GITHUB_SHA          current commit SHA for push events
+  GITHUB_WORKSPACE    repository checkout path for reading commit metadata
 `)
 }
 
