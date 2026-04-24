@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/shotomorisk/kgh/internal/config"
@@ -43,6 +44,8 @@ type Result struct {
 	Push         *PushResult        `json:"push,omitempty"`
 	Poll         *PollResult        `json:"poll,omitempty"`
 	Outputs      *OutputsResult     `json:"outputs,omitempty"`
+	Submission   *SubmissionResult  `json:"submission,omitempty"`
+	Score        *ScoreResult       `json:"score,omitempty"`
 }
 
 type BundleResult struct {
@@ -94,6 +97,32 @@ type OutputFileResult struct {
 	Error          string `json:"error"`
 }
 
+type SubmissionResult struct {
+	Attempted   bool      `json:"attempted"`
+	Submitted   bool      `json:"submitted"`
+	Competition string    `json:"competition"`
+	FilePath    string    `json:"file_path"`
+	FileName    string    `json:"file_name"`
+	Message     string    `json:"message"`
+	AttemptedAt time.Time `json:"attempted_at"`
+}
+
+type ScoreResult struct {
+	State       string    `json:"state"`
+	Competition string    `json:"competition"`
+	FileName    string    `json:"file_name"`
+	Message     string    `json:"message"`
+	Status      string    `json:"status,omitempty"`
+	PublicScore string    `json:"public_score,omitempty"`
+	SubmittedAt time.Time `json:"submitted_at,omitempty"`
+}
+
+const (
+	ScoreStateReady    = "ready"
+	ScoreStatePending  = "pending"
+	ScoreStateNotFound = "not_found"
+)
+
 type Duration time.Duration
 
 func (d Duration) String() string {
@@ -108,6 +137,8 @@ type Adapter interface {
 	PushKernel(context.Context, kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error)
 	PollKernelStatus(context.Context, kaggle.KernelPollRequest) (kaggle.KernelPollResult, error)
 	DownloadKernelOutput(context.Context, kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error)
+	SubmitCompetition(context.Context, kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error)
+	ListCompetitionSubmissions(context.Context, kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error)
 }
 
 type Runner struct {
@@ -115,6 +146,7 @@ type Runner struct {
 	adapter      Adapter
 	pollTimeout  time.Duration
 	pollInterval time.Duration
+	now          func() time.Time
 }
 
 func NewRunner(adapter Adapter) *Runner {
@@ -126,6 +158,7 @@ func NewRunner(adapter Adapter) *Runner {
 		adapter:      adapter,
 		pollTimeout:  30 * time.Minute,
 		pollInterval: 5 * time.Second,
+		now:          time.Now,
 	}
 }
 
@@ -135,6 +168,9 @@ func (r *Runner) Execute(ctx context.Context, req Request) (Result, error) {
 	}
 	if r.loadConfig == nil {
 		r.loadConfig = config.Load
+	}
+	if r.now == nil {
+		r.now = time.Now
 	}
 	if req.ConfigPath == "" {
 		req.ConfigPath = DefaultConfigPath
@@ -246,7 +282,97 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 	}
 	report.Outputs = &outputs
 
+	if !execSpec.Submit || !outputs.Submission.Present {
+		return report, nil
+	}
+
+	submissionAttemptedAt := r.now().UTC()
+	submitMessage := buildCompetitionSubmitMessage(execSpec, pushResp.KernelRef)
+	submitResp, err := r.adapter.SubmitCompetition(ctx, kaggle.CompetitionSubmitRequest{
+		Competition: execSpec.Competition,
+		FilePath:    outputs.Submission.Path,
+		Message:     submitMessage,
+	})
+	if err != nil {
+		return report, fmt.Errorf("submit kaggle competition: %w", err)
+	}
+	report.Submission = &SubmissionResult{
+		Attempted:   true,
+		Submitted:   submitResp.Submitted,
+		Competition: submitResp.Competition,
+		FilePath:    outputs.Submission.Path,
+		FileName:    filepath.Base(outputs.Submission.Path),
+		Message:     submitMessage,
+		AttemptedAt: submissionAttemptedAt,
+	}
+
+	submissionsResp, err := r.adapter.ListCompetitionSubmissions(ctx, kaggle.CompetitionSubmissionsRequest{
+		Competition: execSpec.Competition,
+	})
+	if err != nil {
+		return report, fmt.Errorf("list kaggle competition submissions: %w", err)
+	}
+	report.Score = resolveScoreResult(execSpec.Competition, report.Submission, submissionsResp.Submissions)
+
 	return report, nil
+}
+
+func buildCompetitionSubmitMessage(execSpec spec.ExecutionSpec, kernelRef string) string {
+	return fmt.Sprintf("kgh submit target=%s kernel=%s", execSpec.TargetName, kernelRef)
+}
+
+func resolveScoreResult(competition string, submission *SubmissionResult, rows []kaggle.CompetitionSubmission) *ScoreResult {
+	if submission == nil {
+		return nil
+	}
+
+	score := &ScoreResult{
+		State:       ScoreStateNotFound,
+		Competition: competition,
+		FileName:    submission.FileName,
+		Message:     submission.Message,
+	}
+
+	match, ok := findRelevantSubmission(*submission, rows)
+	if !ok {
+		return score
+	}
+
+	score.Status = strings.TrimSpace(match.Status)
+	score.PublicScore = strings.TrimSpace(match.PublicScore)
+	score.SubmittedAt = match.SubmittedAt
+	if score.PublicScore != "" {
+		score.State = ScoreStateReady
+		return score
+	}
+
+	score.State = ScoreStatePending
+	return score
+}
+
+func findRelevantSubmission(submission SubmissionResult, rows []kaggle.CompetitionSubmission) (kaggle.CompetitionSubmission, bool) {
+	var (
+		best  kaggle.CompetitionSubmission
+		found bool
+	)
+
+	for _, row := range rows {
+		if strings.TrimSpace(row.Description) != submission.Message {
+			continue
+		}
+		if strings.TrimSpace(row.FileName) != submission.FileName {
+			continue
+		}
+		if row.SubmittedAt.IsZero() || row.SubmittedAt.Before(submission.AttemptedAt) {
+			continue
+		}
+		if !found || row.SubmittedAt.After(best.SubmittedAt) {
+			best = row
+			found = true
+		}
+	}
+
+	return best, found
 }
 
 func effectivePollInterval(requested, fallback time.Duration) time.Duration {
