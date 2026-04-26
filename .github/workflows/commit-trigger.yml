@@ -1,0 +1,78 @@
+name: Commit Trigger
+
+on:
+    pull_request:
+        types: [opened, synchronize, reopened]
+
+permissions:
+    contents: read
+
+jobs:
+    commit-trigger:
+        name: Commit Trigger
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event.pull_request.head.sha }}
+
+            - name: Detect submit trigger
+              id: trigger
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  message="$(git show -s --format=%B "${{ github.event.pull_request.head.sha }}")"
+                  if grep -Eq '^[[:space:]]*submit:' <<<"$message"; then
+                    echo "should_run=true" >> "$GITHUB_OUTPUT"
+                    {
+                      echo "## kgh commit trigger"
+                      echo "Detected a \`submit:\` command in the head commit message."
+                    } >> "$GITHUB_STEP_SUMMARY"
+                    exit 0
+                  fi
+
+                  echo "should_run=false" >> "$GITHUB_OUTPUT"
+                  {
+                    echo "## kgh commit trigger"
+                    echo "No \`submit:\` command found in the head commit message. Skipping Kaggle execution."
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+            - name: Set up Go
+              if: steps.trigger.outputs.should_run == 'true'
+              uses: actions/setup-go@v5
+              with:
+                  go-version-file: go.mod
+                  cache: false
+
+            - name: Install Kaggle CLI
+              if: steps.trigger.outputs.should_run == 'true'
+              shell: bash
+              run: python3 -m pip install --upgrade kaggle
+
+            - name: Resolve and execute commit trigger
+              if: steps.trigger.outputs.should_run == 'true'
+              shell: bash
+              env:
+                  KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+                  KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+                  KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+              run: |
+                  set -euo pipefail
+                  args=(github run)
+                  if [[ -n "${KAGGLE_API_TOKEN:-}" || ( -n "${KAGGLE_USERNAME:-}" && -n "${KAGGLE_KEY:-}" ) ]]; then
+                    {
+                      echo "## kgh commit trigger mode"
+                      echo "Running the commit-trigger path in live mode."
+                    } >> "$GITHUB_STEP_SUMMARY"
+                    args+=(--dry-run=false)
+                  else
+                    {
+                      echo "## kgh commit trigger mode"
+                      echo "Kaggle credentials are unavailable, so the commit-trigger path is running in dry-run mode."
+                    } >> "$GITHUB_STEP_SUMMARY"
+                  fi
+
+                  go run ./cmd/kgh/main.go kgh "${args[@]}"
