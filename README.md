@@ -52,6 +52,19 @@ For local debugging, keep using the explicit target path. Create `.kgh/config.ya
 ./kgh run --target issue7-e2e --dry-run=false --poll-interval=2s --timeout=5m
 ```
 
+Live runs return a structured JSON report. The output retrieval stage exposes a
+stable handoff under `outputs` for downstream submit and reporting logic,
+including:
+
+- `output_dir`
+- `submission_path`
+- `metrics_path`
+- per-file `submission` and `metrics` objects with explicit presence/error state
+- `validation.missing_required` and `validation.missing_optional`
+
+This lets later steps consume canonical paths directly instead of re-discovering
+files from the downloaded Kaggle output directory.
+
 The repository includes a PR workflow at [`.github/workflows/commit-trigger.yml`](.github/workflows/commit-trigger.yml) that checks the head commit for `submit:` and invokes `kgh github run` only when a trigger is present.
 
 ### Issue 7 live verification
