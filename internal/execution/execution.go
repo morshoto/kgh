@@ -71,6 +71,8 @@ type PollResult struct {
 	Raw        kaggle.KernelStatusRawStatus   `json:"raw,omitempty"`
 }
 
+// OutputsResult is the stable handoff contract for downstream submit and
+// reporting steps after kernel outputs have been downloaded and validated.
 type OutputsResult struct {
 	OutputDir      string                 `json:"output_dir"`
 	SubmissionPath string                 `json:"submission_path"`
@@ -96,6 +98,8 @@ type OutputValidationResult struct {
 	MissingOptional []string `json:"missing_optional"`
 }
 
+// OutputFileResult records the configured and resolved state of one expected
+// output file so downstream consumers do not need to re-scan the output dir.
 type OutputFileResult struct {
 	ConfiguredPath string `json:"configured_path"`
 	ExpectedPath   string `json:"expected_path"`

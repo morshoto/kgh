@@ -299,6 +299,12 @@ targets:
 	if report.Outputs.SubmissionPath == "" || report.Outputs.MetricsPath == "" {
 		t.Fatalf("expected canonical output paths to be populated: %+v", report.Outputs)
 	}
+	if report.Outputs.Submission.Path != report.Outputs.SubmissionPath {
+		t.Fatalf("expected submission path to mirror structured output file path, got %+v", report.Outputs)
+	}
+	if report.Outputs.Metrics.Path != report.Outputs.MetricsPath {
+		t.Fatalf("expected metrics path to mirror structured output file path, got %+v", report.Outputs)
+	}
 	if !report.Outputs.Validation.Valid {
 		t.Fatalf("expected validation to succeed: %+v", report.Outputs.Validation)
 	}
@@ -670,6 +676,42 @@ func TestBuildOutputsResultRejectsEscapingPaths(t *testing.T) {
 	}
 	if got := result.Submission.Error; !strings.Contains(got, "resolves outside output dir") {
 		t.Fatalf("unexpected submission error %q", got)
+	}
+}
+
+func TestBuildOutputsResultUsesCanonicalOutputDirAndPaths(t *testing.T) {
+	t.Parallel()
+
+	parentDir := t.TempDir()
+	outputDir := filepath.Join(parentDir, "nested", "..", "nested")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir output dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "submission.csv"), []byte("id,label\n1,0\n"), 0o644); err != nil {
+		t.Fatalf("write submission output: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "metrics.json"), []byte(`{"score":0.5}`), 0o644); err != nil {
+		t.Fatalf("write metrics output: %v", err)
+	}
+
+	execSpec := testExecutionSpec()
+	result, err := buildOutputsResult(execSpec, outputDir)
+	if err != nil {
+		t.Fatalf("build outputs result: %v", err)
+	}
+
+	expectedDir, err := filepath.Abs(filepath.Join(parentDir, "nested"))
+	if err != nil {
+		t.Fatalf("resolve expected dir: %v", err)
+	}
+	if result.OutputDir != expectedDir {
+		t.Fatalf("expected canonical output dir %q, got %q", expectedDir, result.OutputDir)
+	}
+	if result.SubmissionPath != filepath.Join(expectedDir, "submission.csv") {
+		t.Fatalf("unexpected canonical submission path %q", result.SubmissionPath)
+	}
+	if result.MetricsPath != filepath.Join(expectedDir, "metrics.json") {
+		t.Fatalf("unexpected canonical metrics path %q", result.MetricsPath)
 	}
 }
 
