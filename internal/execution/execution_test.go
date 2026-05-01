@@ -95,6 +95,9 @@ targets:
 	if time.Duration(report.PollTimeout) != 30*time.Minute {
 		t.Fatalf("unexpected poll timeout %s", report.PollTimeout)
 	}
+	if report.Submission != nil {
+		t.Fatalf("expected no submission details for dry-run, got %+v", report.Submission)
+	}
 }
 
 func TestRunnerExecuteMissingTarget(t *testing.T) {
@@ -225,6 +228,21 @@ targets:
 			}
 			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
 		},
+		submitFn: func(_ context.Context, req kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+			if req.Competition != "playground-series-s6e2" {
+				t.Fatalf("unexpected competition %q", req.Competition)
+			}
+			if filepath.Base(req.FilePath) != "submission.csv" {
+				t.Fatalf("unexpected submission file %q", req.FilePath)
+			}
+			if req.Message != "kgh target=exp142 kernel=yourname/exp142" {
+				t.Fatalf("unexpected submission message %q", req.Message)
+			}
+			return kaggle.CompetitionSubmitResponse{
+				Competition: req.Competition,
+				Submitted:   true,
+			}, nil
+		},
 	}
 
 	runner := NewRunner(adapter)
@@ -293,6 +311,24 @@ targets:
 	if report.Outputs.Metrics.Required || report.Outputs.Metrics.Error != "" {
 		t.Fatalf("expected optional metrics with no error: %+v", report.Outputs.Metrics)
 	}
+	if report.Submission == nil {
+		t.Fatalf("expected submission details to be populated: %+v", report)
+	}
+	if !report.Submission.Enabled || report.Submission.Skipped {
+		t.Fatalf("expected enabled non-skipped submission: %+v", report.Submission)
+	}
+	if !report.Submission.Submitted {
+		t.Fatalf("expected submission to succeed: %+v", report.Submission)
+	}
+	if report.Submission.Competition != "playground-series-s6e2" {
+		t.Fatalf("unexpected submission competition %q", report.Submission.Competition)
+	}
+	if report.Submission.FilePath != report.Outputs.SubmissionPath {
+		t.Fatalf("expected submission file path to match outputs, got %+v vs %+v", report.Submission, report.Outputs)
+	}
+	if report.Submission.Message != "kgh target=exp142 kernel=yourname/exp142" {
+		t.Fatalf("unexpected submission message %q", report.Submission.Message)
+	}
 }
 
 func TestRunnerExecuteLiveMissingRequiredSubmissionFailsValidation(t *testing.T) {
@@ -354,11 +390,17 @@ targets:
 		DryRun:     false,
 		ConfigPath: configPath,
 	})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if got := err.Error(); !strings.Contains(got, "submit enabled but submission artifact is missing") {
+		t.Fatalf("unexpected error %q", got)
 	}
 	if report.Outputs == nil {
 		t.Fatalf("expected outputs handoff, got %+v", report)
+	}
+	if report.Submission == nil {
+		t.Fatalf("expected submission details on failure, got %+v", report)
 	}
 	if report.Outputs.Submission.Present {
 		t.Fatalf("expected submission to be missing: %+v", report.Outputs.Submission)
@@ -383,6 +425,15 @@ targets:
 	}
 	if report.Outputs.Submission.Error == "" || !strings.Contains(report.Outputs.Submission.Error, "submission output is missing") {
 		t.Fatalf("unexpected submission error %+v", report.Outputs.Submission)
+	}
+	if !report.Submission.Enabled || report.Submission.Submitted {
+		t.Fatalf("expected attempted but unsuccessful submission metadata: %+v", report.Submission)
+	}
+	if report.Submission.FilePath != "" {
+		t.Fatalf("expected empty submission file path when output is missing, got %+v", report.Submission)
+	}
+	if report.Submission.Reason == "" || !strings.Contains(report.Submission.Reason, "submission output is missing") {
+		t.Fatalf("unexpected submission reason %+v", report.Submission)
 	}
 }
 
@@ -436,6 +487,10 @@ targets:
 			}
 			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
 		},
+		submitFn: func(_ context.Context, _ kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+			t.Fatal("did not expect submission when submit=false")
+			return kaggle.CompetitionSubmitResponse{}, nil
+		},
 	}
 
 	report, err := NewRunner(adapter).Execute(context.Background(), Request{
@@ -463,6 +518,12 @@ targets:
 	}
 	if report.Outputs.Metrics.Error == "" || !strings.Contains(report.Outputs.Metrics.Error, "metrics output is missing") {
 		t.Fatalf("unexpected metrics error %+v", report.Outputs.Metrics)
+	}
+	if report.Submission == nil {
+		t.Fatalf("expected submission details to explain skip: %+v", report)
+	}
+	if report.Submission.Enabled || !report.Submission.Skipped || report.Submission.Reason != "submission disabled for target" {
+		t.Fatalf("unexpected submission skip details %+v", report.Submission)
 	}
 }
 
@@ -516,6 +577,10 @@ targets:
 			}
 			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
 		},
+		submitFn: func(_ context.Context, _ kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+			t.Fatal("did not expect submission when submit=false")
+			return kaggle.CompetitionSubmitResponse{}, nil
+		},
 	}
 
 	report, err := NewRunner(adapter).Execute(context.Background(), Request{
@@ -540,6 +605,12 @@ targets:
 	}
 	if report.Outputs.Submission.Error == "" || !strings.Contains(report.Outputs.Submission.Error, "submission output is missing") {
 		t.Fatalf("unexpected submission error %+v", report.Outputs.Submission)
+	}
+	if report.Submission == nil {
+		t.Fatalf("expected submission details to explain skip: %+v", report)
+	}
+	if report.Submission.Enabled || !report.Submission.Skipped || report.Submission.Reason != "submission disabled for target" {
+		t.Fatalf("unexpected submission skip details %+v", report.Submission)
 	}
 }
 
@@ -607,6 +678,7 @@ type liveAdapter struct {
 	pushFn     func(context.Context, kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error)
 	pollFn     func(context.Context, kaggle.KernelPollRequest) (kaggle.KernelPollResult, error)
 	downloadFn func(context.Context, kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error)
+	submitFn   func(context.Context, kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error)
 }
 
 func (a *liveAdapter) PushKernel(ctx context.Context, req kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
@@ -628,6 +700,13 @@ func (a *liveAdapter) DownloadKernelOutput(ctx context.Context, req kaggle.Downl
 		a.t.Fatal("downloadFn must be set")
 	}
 	return a.downloadFn(ctx, req)
+}
+
+func (a *liveAdapter) SubmitCompetition(ctx context.Context, req kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+	if a.submitFn == nil {
+		a.t.Fatal("submitFn must be set")
+	}
+	return a.submitFn(ctx, req)
 }
 
 func testExecutionSpec() spec.ExecutionSpec {
