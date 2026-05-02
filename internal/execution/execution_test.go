@@ -243,6 +243,22 @@ targets:
 				Submitted:   true,
 			}, nil
 		},
+		listFn: func(_ context.Context, req kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error) {
+			if req.Competition != "playground-series-s6e2" {
+				t.Fatalf("unexpected competition %q", req.Competition)
+			}
+			return kaggle.CompetitionSubmissionsResponse{
+				Submissions: []kaggle.CompetitionSubmission{
+					{
+						FileName:    "submission.csv",
+						Description: "kgh target=exp142 kernel=yourname/exp142",
+						Status:      "complete",
+						PublicScore: "0.12345",
+						SubmittedAt: time.Unix(10, 0),
+					},
+				},
+			}, nil
+		},
 	}
 
 	runner := NewRunner(adapter)
@@ -334,6 +350,18 @@ targets:
 	}
 	if report.Submission.Message != "kgh target=exp142 kernel=yourname/exp142" {
 		t.Fatalf("unexpected submission message %q", report.Submission.Message)
+	}
+	if !report.Submission.ScoreRetrieved {
+		t.Fatalf("expected score retrieval to succeed: %+v", report.Submission)
+	}
+	if report.Submission.PublicScore != "0.12345" {
+		t.Fatalf("unexpected public score %q", report.Submission.PublicScore)
+	}
+	if report.Submission.Status != "complete" {
+		t.Fatalf("unexpected submission status %q", report.Submission.Status)
+	}
+	if !report.Submission.SubmittedAt.Equal(time.Unix(10, 0)) {
+		t.Fatalf("unexpected submission timestamp %s", report.Submission.SubmittedAt)
 	}
 }
 
@@ -440,6 +468,110 @@ targets:
 	}
 	if report.Submission.Reason == "" || !strings.Contains(report.Submission.Reason, "submission output is missing") {
 		t.Fatalf("unexpected submission reason %+v", report.Submission)
+	}
+}
+
+func TestRunnerExecuteLiveFailsWhenPublicScoreCannotBeRetrieved(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	notebook := filepath.Join(dir, "notebooks", "exp142.ipynb")
+	if err := os.MkdirAll(filepath.Dir(notebook), 0o755); err != nil {
+		t.Fatalf("mkdir notebook dir: %v", err)
+	}
+	if err := os.WriteFile(notebook, []byte(`{"cells":[]}`), 0o644); err != nil {
+		t.Fatalf("write notebook: %v", err)
+	}
+
+	configPath := filepath.Join(dir, ".kgh", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`
+targets:
+  exp142:
+    notebook: `+notebook+`
+    kernel_id: yourname/exp142
+    competition: playground-series-s6e2
+    submit: true
+    outputs:
+      submission: submission.csv
+      metrics: metrics.json
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	adapter := &liveAdapter{
+		t: t,
+		pushFn: func(_ context.Context, _ kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
+			return kaggle.PushKernelResponse{KernelRef: "yourname/exp142"}, nil
+		},
+		pollFn: func(_ context.Context, _ kaggle.KernelPollRequest) (kaggle.KernelPollResult, error) {
+			return kaggle.KernelPollResult{
+				KernelStatusResponse: kaggle.KernelStatusResponse{
+					KernelRef: "yourname/exp142",
+					Status:    "complete",
+				},
+				Terminal: kaggle.KernelPollTerminalStateSucceeded,
+			}, nil
+		},
+		downloadFn: func(_ context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "submission.csv"), []byte("id,label\n1,0\n"), 0o644); err != nil {
+				t.Fatalf("write submission output: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "metrics.json"), []byte(`{"score":0.5}`), 0o644); err != nil {
+				t.Fatalf("write metrics output: %v", err)
+			}
+			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
+		},
+		submitFn: func(_ context.Context, req kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+			return kaggle.CompetitionSubmitResponse{
+				Competition: req.Competition,
+				Submitted:   true,
+			}, nil
+		},
+		listFn: func(_ context.Context, _ kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error) {
+			return kaggle.CompetitionSubmissionsResponse{
+				Submissions: []kaggle.CompetitionSubmission{
+					{
+						FileName:    "submission.csv",
+						Description: "kgh target=exp142 kernel=yourname/exp142",
+						Status:      "pending",
+						SubmittedAt: time.Unix(10, 0),
+					},
+				},
+			}, nil
+		},
+	}
+
+	report, err := NewRunner(adapter).Execute(context.Background(), Request{
+		Target:     "exp142",
+		DryRun:     false,
+		ConfigPath: configPath,
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if got := err.Error(); !strings.Contains(got, "retrieve latest public score") {
+		t.Fatalf("unexpected error %q", got)
+	}
+	if report.Submission == nil {
+		t.Fatalf("expected submission details to be populated: %+v", report)
+	}
+	if !report.Submission.Submitted {
+		t.Fatalf("expected submission to succeed before score lookup failure: %+v", report.Submission)
+	}
+	if report.Submission.ScoreRetrieved {
+		t.Fatalf("did not expect score retrieval to succeed: %+v", report.Submission)
+	}
+	if report.Submission.Status != "pending" {
+		t.Fatalf("unexpected submission status %q", report.Submission.Status)
+	}
+	if report.Submission.PublicScore != "" {
+		t.Fatalf("expected empty public score, got %q", report.Submission.PublicScore)
+	}
+	if report.Submission.ScoreReason == "" || !strings.Contains(report.Submission.ScoreReason, "no public score yet") {
+		t.Fatalf("unexpected score reason %+v", report.Submission)
 	}
 }
 
