@@ -847,6 +847,73 @@ func TestBuildOutputsResultUsesCanonicalOutputDirAndPaths(t *testing.T) {
 	}
 }
 
+func TestResolveLatestRelevantSubmissionPrefersNewestScoredMatch(t *testing.T) {
+	t.Parallel()
+
+	result, err := resolveLatestRelevantSubmission("kgh target=exp142 kernel=yourname/exp142", []kaggle.CompetitionSubmission{
+		{
+			Description: "unrelated submission",
+			Status:      "complete",
+			PublicScore: "0.99999",
+			SubmittedAt: time.Unix(50, 0),
+		},
+		{
+			Description: "kgh target=exp142 kernel=yourname/exp142",
+			Status:      "pending",
+			SubmittedAt: time.Unix(10, 0),
+		},
+		{
+			Description: "kgh target=exp142 kernel=yourname/exp142",
+			Status:      "complete",
+			PublicScore: "0.11111",
+			SubmittedAt: time.Unix(20, 0),
+		},
+		{
+			Description: "kgh target=exp142 kernel=yourname/exp142",
+			Status:      "complete",
+			PublicScore: "0.22222",
+			SubmittedAt: time.Unix(30, 0),
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !result.ScoreRetrieved {
+		t.Fatalf("expected score retrieval to succeed: %+v", result)
+	}
+	if result.PublicScore != "0.22222" {
+		t.Fatalf("unexpected public score %q", result.PublicScore)
+	}
+	if result.Status != "complete" {
+		t.Fatalf("unexpected submission status %q", result.Status)
+	}
+	if !result.SubmittedAt.Equal(time.Unix(30, 0)) {
+		t.Fatalf("unexpected submission timestamp %s", result.SubmittedAt)
+	}
+}
+
+func TestResolveLatestRelevantSubmissionFailsWhenNoMatchingSubmissionExists(t *testing.T) {
+	t.Parallel()
+
+	result, err := resolveLatestRelevantSubmission("kgh target=exp142 kernel=yourname/exp142", []kaggle.CompetitionSubmission{
+		{
+			Description: "different submission",
+			Status:      "complete",
+			PublicScore: "0.12345",
+			SubmittedAt: time.Unix(20, 0),
+		},
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "no matching Kaggle submission found") {
+		t.Fatalf("unexpected error %q", err.Error())
+	}
+	if result.ScoreReason == "" || !strings.Contains(result.ScoreReason, "no matching Kaggle submission found") {
+		t.Fatalf("unexpected result %+v", result)
+	}
+}
+
 type liveAdapter struct {
 	t          *testing.T
 	pushFn     func(context.Context, kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error)
