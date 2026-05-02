@@ -83,13 +83,18 @@ type OutputsResult struct {
 }
 
 type SubmissionResult struct {
-	Enabled     bool   `json:"enabled"`
-	Skipped     bool   `json:"skipped"`
-	Competition string `json:"competition,omitempty"`
-	FilePath    string `json:"file_path,omitempty"`
-	Message     string `json:"message,omitempty"`
-	Submitted   bool   `json:"submitted"`
-	Reason      string `json:"reason,omitempty"`
+	Enabled        bool      `json:"enabled"`
+	Skipped        bool      `json:"skipped"`
+	Competition    string    `json:"competition,omitempty"`
+	FilePath       string    `json:"file_path,omitempty"`
+	Message        string    `json:"message,omitempty"`
+	Submitted      bool      `json:"submitted"`
+	Reason         string    `json:"reason,omitempty"`
+	Status         string    `json:"status,omitempty"`
+	PublicScore    string    `json:"public_score,omitempty"`
+	SubmittedAt    time.Time `json:"submitted_at,omitempty"`
+	ScoreRetrieved bool      `json:"score_retrieved"`
+	ScoreReason    string    `json:"score_reason,omitempty"`
 }
 
 type OutputValidationResult struct {
@@ -124,6 +129,7 @@ type Adapter interface {
 	PollKernelStatus(context.Context, kaggle.KernelPollRequest) (kaggle.KernelPollResult, error)
 	DownloadKernelOutput(context.Context, kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error)
 	SubmitCompetition(context.Context, kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error)
+	ListCompetitionSubmissions(context.Context, kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error)
 }
 
 type Runner struct {

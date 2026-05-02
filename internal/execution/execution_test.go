@@ -721,6 +721,7 @@ type liveAdapter struct {
 	pollFn     func(context.Context, kaggle.KernelPollRequest) (kaggle.KernelPollResult, error)
 	downloadFn func(context.Context, kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error)
 	submitFn   func(context.Context, kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error)
+	listFn     func(context.Context, kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error)
 }
 
 func (a *liveAdapter) PushKernel(ctx context.Context, req kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
@@ -749,6 +750,13 @@ func (a *liveAdapter) SubmitCompetition(ctx context.Context, req kaggle.Competit
 		a.t.Fatal("submitFn must be set")
 	}
 	return a.submitFn(ctx, req)
+}
+
+func (a *liveAdapter) ListCompetitionSubmissions(ctx context.Context, req kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error) {
+	if a.listFn == nil {
+		a.t.Fatal("listFn must be set")
+	}
+	return a.listFn(ctx, req)
 }
 
 func testExecutionSpec() spec.ExecutionSpec {
