@@ -83,13 +83,18 @@ type OutputsResult struct {
 }
 
 type SubmissionResult struct {
-	Enabled     bool   `json:"enabled"`
-	Skipped     bool   `json:"skipped"`
-	Competition string `json:"competition,omitempty"`
-	FilePath    string `json:"file_path,omitempty"`
-	Message     string `json:"message,omitempty"`
-	Submitted   bool   `json:"submitted"`
-	Reason      string `json:"reason,omitempty"`
+	Enabled        bool      `json:"enabled"`
+	Skipped        bool      `json:"skipped"`
+	Competition    string    `json:"competition,omitempty"`
+	FilePath       string    `json:"file_path,omitempty"`
+	Message        string    `json:"message,omitempty"`
+	Submitted      bool      `json:"submitted"`
+	Reason         string    `json:"reason,omitempty"`
+	Status         string    `json:"status,omitempty"`
+	PublicScore    string    `json:"public_score,omitempty"`
+	SubmittedAt    time.Time `json:"submitted_at,omitempty"`
+	ScoreRetrieved bool      `json:"score_retrieved"`
+	ScoreReason    string    `json:"score_reason,omitempty"`
 }
 
 type OutputValidationResult struct {
@@ -124,6 +129,7 @@ type Adapter interface {
 	PollKernelStatus(context.Context, kaggle.KernelPollRequest) (kaggle.KernelPollResult, error)
 	DownloadKernelOutput(context.Context, kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error)
 	SubmitCompetition(context.Context, kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error)
+	ListCompetitionSubmissions(context.Context, kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error)
 }
 
 type Runner struct {
@@ -303,7 +309,66 @@ func (r *Runner) submitOutputs(ctx context.Context, execSpec spec.ExecutionSpec,
 
 	result.Competition = resp.Competition
 	result.Submitted = resp.Submitted
+
+	submissionsResp, err := r.adapter.ListCompetitionSubmissions(ctx, kaggle.CompetitionSubmissionsRequest{
+		Competition: execSpec.Competition,
+	})
+	if err != nil {
+		result.ScoreReason = "list competition submissions"
+		return result, fmt.Errorf("retrieve latest public score: %w", err)
+	}
+
+	scoreResult, err := resolveLatestRelevantSubmission(result.Message, submissionsResp.Submissions)
+	result.Status = scoreResult.Status
+	result.PublicScore = scoreResult.PublicScore
+	result.SubmittedAt = scoreResult.SubmittedAt
+	result.ScoreRetrieved = scoreResult.ScoreRetrieved
+	result.ScoreReason = scoreResult.ScoreReason
+	if err != nil {
+		return result, fmt.Errorf("retrieve latest public score: %w", err)
+	}
+
 	return result, nil
+}
+
+func resolveLatestRelevantSubmission(message string, submissions []kaggle.CompetitionSubmission) (SubmissionResult, error) {
+	var latestMatch *kaggle.CompetitionSubmission
+	var latestScored *kaggle.CompetitionSubmission
+
+	for i := range submissions {
+		submission := &submissions[i]
+		if submission.Description != message {
+			continue
+		}
+
+		if latestMatch == nil || submission.SubmittedAt.After(latestMatch.SubmittedAt) {
+			latestMatch = submission
+		}
+		if submission.PublicScore != "" && (latestScored == nil || submission.SubmittedAt.After(latestScored.SubmittedAt)) {
+			latestScored = submission
+		}
+	}
+
+	if latestMatch == nil {
+		return SubmissionResult{
+			ScoreReason: "no matching Kaggle submission found for current run",
+		}, fmt.Errorf("no matching Kaggle submission found for current run")
+	}
+
+	if latestScored == nil {
+		return SubmissionResult{
+			Status:      latestMatch.Status,
+			SubmittedAt: latestMatch.SubmittedAt,
+			ScoreReason: "matching Kaggle submission has no public score yet",
+		}, fmt.Errorf("matching Kaggle submission has no public score yet")
+	}
+
+	return SubmissionResult{
+		Status:         latestScored.Status,
+		PublicScore:    latestScored.PublicScore,
+		SubmittedAt:    latestScored.SubmittedAt,
+		ScoreRetrieved: true,
+	}, nil
 }
 
 func effectivePollInterval(requested, fallback time.Duration) time.Duration {
