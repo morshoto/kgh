@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.0.8](https://github.com/morshoto/kgh/compare/v0.0.7...v0.0.8) - 2026-05-02
+- kaggle submission validation by @morshoto in https://github.com/morshoto/kgh/pull/60
+- chore: refine dependabot ecosystems by @morshoto in https://github.com/morshoto/kgh/pull/70
+- build(deps): bump docker/setup-buildx-action from 3 to 4 by @dependabot[bot] in https://github.com/morshoto/kgh/pull/73
+- build(deps): bump actions/setup-node from 4 to 6 by @dependabot[bot] in https://github.com/morshoto/kgh/pull/75
+- build(deps): bump actions/github-script from 7 to 9 by @dependabot[bot] in https://github.com/morshoto/kgh/pull/74
+- build(deps): bump goreleaser/goreleaser-action from 6 to 7 by @dependabot[bot] in https://github.com/morshoto/kgh/pull/72
+- build(deps): bump docker/setup-qemu-action from 3 to 4 by @dependabot[bot] in https://github.com/morshoto/kgh/pull/71
+- Add commit-trigger GitHub entrypoint by @morshoto in https://github.com/morshoto/kgh/pull/68
+- Submit after successful output download by @morshoto in https://github.com/morshoto/kgh/pull/69
+- Add structured kernel output handoff contract by @morshoto in https://github.com/morshoto/kgh/pull/81
+- build(deps): bump actions/setup-go from 5 to 6 by @dependabot[bot] in https://github.com/morshoto/kgh/pull/82
+- build(deps): bump docker/login-action from 3 to 4 by @dependabot[bot] in https://github.com/morshoto/kgh/pull/85
+- build(deps): bump actions/cache from 4 to 5 by @dependabot[bot] in https://github.com/morshoto/kgh/pull/84
+
 ## [v0.0.7](https://github.com/morshoto/kgh/compare/v0.0.6...v0.0.7) - 2026-04-15
 - Local Kaggle Bundle Staging by @morshoto in https://github.com/morshoto/kgh/pull/47
 - kaggle kernel push by @morshoto in https://github.com/morshoto/kgh/pull/49
