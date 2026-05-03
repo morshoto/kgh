@@ -57,7 +57,7 @@ kgh run --target exp142 --poll-interval=2s --timeout=5m
 
 Dry-run returns the resolved execution contract as JSON.
 
-Live mode returns a richer JSON report that can include:
+Live mode returns a richer JSON report payload that can include:
 
 - resolved execution metadata
 - staged bundle information
@@ -66,5 +66,6 @@ Live mode returns a richer JSON report that can include:
 - downloaded output paths
 - submission result when `submit: true`
 
-When `submit: true` succeeds, the live JSON includes structured submission metadata under
-`submission` and `score`, including `submission_id`, `status`, and `submitted_at`.
+When `submit: true` succeeds, the live JSON/report payload includes structured submission
+metadata under `submission` and `score`, including `submission_id`, `status`, and
+`submitted_at`.
