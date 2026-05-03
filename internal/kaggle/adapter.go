@@ -88,6 +88,7 @@ type CompetitionSubmissionsResponse struct {
 }
 
 type CompetitionSubmission struct {
+	Ref         string
 	FileName    string
 	Description string
 	Status      string
@@ -292,7 +293,7 @@ func buildCompetitionSubmissionsCommand(req CompetitionSubmissionsRequest) ([]st
 	if req.Limit != 0 {
 		return nil, unsupportedRequest("competition submissions limit")
 	}
-	return []string{"competitions", "submissions", "-c", competition}, nil
+	return []string{"competitions", "submissions", "-c", competition, "-v"}, nil
 }
 
 func requiredValue(field string, value string) (string, error) {
@@ -340,7 +341,7 @@ func parseCompetitionSubmissionsResult(result Result) (CompetitionSubmissionsRes
 		return CompetitionSubmissionsResponse{}, nil
 	}
 	header := normalizeHeader(rows[0])
-	required := []string{"file", "description", "date", "status", "publicscore"}
+	required := []string{"ref", "file", "description", "date", "status", "publicscore"}
 	for _, name := range required {
 		if _, ok := header[name]; !ok {
 			return CompetitionSubmissionsResponse{}, unexpectedOutputError("list competition submissions", result, "missing submissions header")
@@ -353,6 +354,7 @@ func parseCompetitionSubmissionsResult(result Result) (CompetitionSubmissionsRes
 			continue
 		}
 		submission := CompetitionSubmission{
+			Ref:         valueAt(row, header, "ref"),
 			FileName:    valueAt(row, header, "file"),
 			Description: valueAt(row, header, "description"),
 			Status:      valueAt(row, header, "status"),
