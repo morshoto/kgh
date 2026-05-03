@@ -102,23 +102,27 @@ type OutputFileResult struct {
 }
 
 type SubmissionResult struct {
-	Attempted   bool      `json:"attempted"`
-	Submitted   bool      `json:"submitted"`
-	Competition string    `json:"competition"`
-	FilePath    string    `json:"file_path"`
-	FileName    string    `json:"file_name"`
-	Message     string    `json:"message"`
-	AttemptedAt time.Time `json:"attempted_at"`
+	Attempted    bool      `json:"attempted"`
+	Submitted    bool      `json:"submitted"`
+	Competition  string    `json:"competition"`
+	FilePath     string    `json:"file_path"`
+	FileName     string    `json:"file_name"`
+	Message      string    `json:"message"`
+	AttemptedAt  time.Time `json:"attempted_at"`
+	SubmissionID string    `json:"submission_id,omitempty"`
+	Status       string    `json:"status,omitempty"`
+	SubmittedAt  time.Time `json:"submitted_at,omitempty"`
 }
 
 type ScoreResult struct {
-	State       string    `json:"state"`
-	Competition string    `json:"competition"`
-	FileName    string    `json:"file_name"`
-	Message     string    `json:"message"`
-	Status      string    `json:"status,omitempty"`
-	PublicScore string    `json:"public_score,omitempty"`
-	SubmittedAt time.Time `json:"submitted_at,omitempty"`
+	State        string    `json:"state"`
+	Competition  string    `json:"competition"`
+	FileName     string    `json:"file_name"`
+	Message      string    `json:"message"`
+	SubmissionID string    `json:"submission_id,omitempty"`
+	Status       string    `json:"status,omitempty"`
+	PublicScore  string    `json:"public_score,omitempty"`
+	SubmittedAt  time.Time `json:"submitted_at,omitempty"`
 }
 
 const (
@@ -319,7 +323,14 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 	if err != nil {
 		return report, fmt.Errorf("list kaggle competition submissions: %w", err)
 	}
-	report.Score = resolveScoreResult(execSpec.Competition, report.Submission, submissionsResp.Submissions)
+	match, ok := findRelevantSubmission(*report.Submission, submissionsResp.Submissions)
+	if !ok {
+		return report, fmt.Errorf("submission metadata unavailable: no matching Kaggle submission row found")
+	}
+	if err := applySubmissionMetadata(report.Submission, match); err != nil {
+		return report, fmt.Errorf("submission metadata unavailable: %w", err)
+	}
+	report.Score = resolveScoreResult(execSpec.Competition, report.Submission, match)
 
 	return report, nil
 }
@@ -328,23 +339,18 @@ func buildCompetitionSubmitMessage(execSpec spec.ExecutionSpec, kernelRef string
 	return fmt.Sprintf("kgh submit target=%s kernel=%s", execSpec.TargetName, kernelRef)
 }
 
-func resolveScoreResult(competition string, submission *SubmissionResult, rows []kaggle.CompetitionSubmission) *ScoreResult {
+func resolveScoreResult(competition string, submission *SubmissionResult, match kaggle.CompetitionSubmission) *ScoreResult {
 	if submission == nil {
 		return nil
 	}
 
 	score := &ScoreResult{
-		State:       ScoreStateNotFound,
-		Competition: competition,
-		FileName:    submission.FileName,
-		Message:     submission.Message,
+		State:        ScoreStateNotFound,
+		Competition:  competition,
+		FileName:     submission.FileName,
+		Message:      submission.Message,
+		SubmissionID: submission.SubmissionID,
 	}
-
-	match, ok := findRelevantSubmission(*submission, rows)
-	if !ok {
-		return score
-	}
-
 	score.Status = strings.TrimSpace(match.Status)
 	score.PublicScore = strings.TrimSpace(match.PublicScore)
 	score.SubmittedAt = match.SubmittedAt
@@ -370,16 +376,44 @@ func findRelevantSubmission(submission SubmissionResult, rows []kaggle.Competiti
 		if strings.TrimSpace(row.FileName) != submission.FileName {
 			continue
 		}
-		if row.SubmittedAt.IsZero() || row.SubmittedAt.Before(submission.AttemptedAt) {
+		if !row.SubmittedAt.IsZero() && row.SubmittedAt.Before(submission.AttemptedAt) {
 			continue
 		}
-		if !found || row.SubmittedAt.After(best.SubmittedAt) {
+		if !found {
+			best = row
+			found = true
+			continue
+		}
+		if best.SubmittedAt.IsZero() || row.SubmittedAt.After(best.SubmittedAt) {
 			best = row
 			found = true
 		}
 	}
 
 	return best, found
+}
+
+func applySubmissionMetadata(submission *SubmissionResult, match kaggle.CompetitionSubmission) error {
+	if submission == nil {
+		return fmt.Errorf("submission result is nil")
+	}
+
+	submissionID := strings.TrimSpace(match.Ref)
+	if submissionID == "" {
+		return fmt.Errorf("matched Kaggle submission is missing submission ID")
+	}
+	status := strings.TrimSpace(match.Status)
+	if status == "" {
+		return fmt.Errorf("matched Kaggle submission is missing status")
+	}
+	if match.SubmittedAt.IsZero() {
+		return fmt.Errorf("matched Kaggle submission is missing timestamp")
+	}
+
+	submission.SubmissionID = submissionID
+	submission.Status = status
+	submission.SubmittedAt = match.SubmittedAt
+	return nil
 }
 
 func effectivePollInterval(requested, fallback time.Duration) time.Duration {

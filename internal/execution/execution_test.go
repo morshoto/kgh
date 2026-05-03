@@ -251,6 +251,7 @@ targets:
 			return kaggle.CompetitionSubmissionsResponse{
 				Submissions: []kaggle.CompetitionSubmission{
 					{
+						Ref:         "123",
 						FileName:    "submission.csv",
 						Description: "kgh submit target=exp142 kernel=yourname/exp142",
 						Status:      "complete",
@@ -349,11 +350,23 @@ targets:
 	if report.Submission.FileName != "submission.csv" {
 		t.Fatalf("unexpected submission file name %q", report.Submission.FileName)
 	}
+	if report.Submission.SubmissionID != "123" {
+		t.Fatalf("unexpected submission ID %q", report.Submission.SubmissionID)
+	}
+	if report.Submission.Status != "complete" {
+		t.Fatalf("unexpected submission status %q", report.Submission.Status)
+	}
+	if !report.Submission.SubmittedAt.Equal(time.Date(2026, 4, 24, 12, 0, 1, 0, time.UTC)) {
+		t.Fatalf("unexpected submission timestamp %s", report.Submission.SubmittedAt)
+	}
 	if report.Score == nil {
 		t.Fatalf("expected score result, got %+v", report)
 	}
 	if report.Score.State != ScoreStateReady {
 		t.Fatalf("unexpected score state %+v", report.Score)
+	}
+	if report.Score.SubmissionID != "123" {
+		t.Fatalf("unexpected score submission ID %q", report.Score.SubmissionID)
 	}
 	if report.Score.PublicScore != "0.12345" || report.Score.Status != "complete" {
 		t.Fatalf("unexpected score result %+v", report.Score)
@@ -656,6 +669,7 @@ func TestRunnerExecuteLiveScorePendingWhenMatchedSubmissionHasNoScore(t *testing
 		listFn: func(_ context.Context, _ kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error) {
 			return kaggle.CompetitionSubmissionsResponse{
 				Submissions: []kaggle.CompetitionSubmission{{
+					Ref:         "sub-1",
 					FileName:    "submission.csv",
 					Description: "kgh submit target=exp142 kernel=yourname/exp142",
 					Status:      "pending",
@@ -678,6 +692,9 @@ func TestRunnerExecuteLiveScorePendingWhenMatchedSubmissionHasNoScore(t *testing
 	}
 	if report.Score == nil || report.Score.State != ScoreStatePending {
 		t.Fatalf("expected pending score result, got %+v", report.Score)
+	}
+	if report.Submission == nil || report.Submission.SubmissionID != "sub-1" || report.Submission.Status != "pending" {
+		t.Fatalf("unexpected submission metadata %+v", report.Submission)
 	}
 	if report.Score.PublicScore != "" || report.Score.Status != "pending" {
 		t.Fatalf("unexpected pending score result %+v", report.Score)
@@ -730,11 +747,11 @@ func TestRunnerExecuteLiveScoreNotFoundWhenNoSubmissionMatchesCurrentRun(t *test
 		DryRun:     false,
 		ConfigPath: configPath,
 	})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	if err == nil {
+		t.Fatalf("expected an error, got report %+v", report)
 	}
-	if report.Score == nil || report.Score.State != ScoreStateNotFound {
-		t.Fatalf("expected not_found score result, got %+v", report.Score)
+	if got := err.Error(); !strings.Contains(got, "submission metadata unavailable: no matching Kaggle submission row found") {
+		t.Fatalf("unexpected error %q", got)
 	}
 }
 
@@ -818,6 +835,103 @@ func TestRunnerExecuteLiveListSubmissionsFailureReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "list kaggle competition submissions") {
 		t.Fatalf("unexpected error %q", err)
+	}
+}
+
+func TestRunnerExecuteLiveFailsWhenSubmissionMetadataMissingFields(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		row         kaggle.CompetitionSubmission
+		wantErrPart string
+	}{
+		{
+			name: "missing submission id",
+			row: kaggle.CompetitionSubmission{
+				FileName:    "submission.csv",
+				Description: "kgh submit target=exp142 kernel=yourname/exp142",
+				Status:      "complete",
+				PublicScore: "0.12345",
+				SubmittedAt: time.Date(2026, 4, 24, 12, 0, 1, 0, time.UTC),
+			},
+			wantErrPart: "matched Kaggle submission is missing submission ID",
+		},
+		{
+			name: "missing status",
+			row: kaggle.CompetitionSubmission{
+				Ref:         "sub-1",
+				FileName:    "submission.csv",
+				Description: "kgh submit target=exp142 kernel=yourname/exp142",
+				PublicScore: "0.12345",
+				SubmittedAt: time.Date(2026, 4, 24, 12, 0, 1, 0, time.UTC),
+			},
+			wantErrPart: "matched Kaggle submission is missing status",
+		},
+		{
+			name: "missing timestamp",
+			row: kaggle.CompetitionSubmission{
+				Ref:         "sub-1",
+				FileName:    "submission.csv",
+				Description: "kgh submit target=exp142 kernel=yourname/exp142",
+				Status:      "complete",
+				PublicScore: "0.12345",
+			},
+			wantErrPart: "matched Kaggle submission is missing timestamp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			configPath := writeLiveConfig(t, true)
+			adapter := &liveAdapter{
+				t: t,
+				pushFn: func(_ context.Context, _ kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
+					return kaggle.PushKernelResponse{KernelRef: "yourname/exp142", Output: kaggle.Result{}}, nil
+				},
+				pollFn: func(_ context.Context, req kaggle.KernelPollRequest) (kaggle.KernelPollResult, error) {
+					return kaggle.KernelPollResult{
+						KernelStatusResponse: kaggle.KernelStatusResponse{KernelRef: req.KernelRef, Status: "complete"},
+						Attempts:             1,
+						StartedAt:            time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC),
+						FinishedAt:           time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC),
+						Elapsed:              0,
+						Terminal:             kaggle.KernelPollTerminalStateSucceeded,
+					}, nil
+				},
+				downloadFn: func(_ context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+					if err := os.WriteFile(filepath.Join(req.OutputDir, "submission.csv"), []byte("id,label\n1,0\n"), 0o644); err != nil {
+						t.Fatalf("write submission output: %v", err)
+					}
+					return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
+				},
+				submitFn: func(_ context.Context, req kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+					return kaggle.CompetitionSubmitResponse{Competition: req.Competition, Submitted: true}, nil
+				},
+				listFn: func(_ context.Context, _ kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error) {
+					return kaggle.CompetitionSubmissionsResponse{Submissions: []kaggle.CompetitionSubmission{tt.row}}, nil
+				},
+			}
+
+			runner := NewRunner(adapter)
+			runner.now = func() time.Time {
+				return time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)
+			}
+
+			_, err := runner.Execute(context.Background(), Request{
+				Target:     "exp142",
+				DryRun:     false,
+				ConfigPath: configPath,
+			})
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if got := err.Error(); !strings.Contains(got, tt.wantErrPart) {
+				t.Fatalf("unexpected error %q", got)
+			}
+		})
 	}
 }
 
@@ -934,12 +1048,14 @@ func TestFindRelevantSubmissionPrefersNewestMatchingRow(t *testing.T) {
 			SubmittedAt: time.Unix(50, 0),
 		},
 		{
+			Ref:         "sub-2",
 			Description: "kgh submit target=exp142 kernel=yourname/exp142",
 			FileName:    "submission.csv",
 			Status:      "pending",
 			SubmittedAt: time.Unix(10, 0),
 		},
 		{
+			Ref:         "sub-3",
 			Description: "kgh submit target=exp142 kernel=yourname/exp142",
 			FileName:    "submission.csv",
 			Status:      "complete",
@@ -947,6 +1063,7 @@ func TestFindRelevantSubmissionPrefersNewestMatchingRow(t *testing.T) {
 			SubmittedAt: time.Unix(20, 0),
 		},
 		{
+			Ref:         "sub-4",
 			Description: "kgh submit target=exp142 kernel=yourname/exp142",
 			FileName:    "submission.csv",
 			Status:      "complete",
@@ -963,37 +1080,39 @@ func TestFindRelevantSubmissionPrefersNewestMatchingRow(t *testing.T) {
 	if result.Status != "complete" {
 		t.Fatalf("unexpected submission status %q", result.Status)
 	}
+	if result.Ref != "sub-4" {
+		t.Fatalf("unexpected submission ref %q", result.Ref)
+	}
 	if !result.SubmittedAt.Equal(time.Unix(30, 0)) {
 		t.Fatalf("unexpected submission timestamp %s", result.SubmittedAt)
 	}
 }
 
-func TestResolveScoreResultReturnsNotFoundWhenNoMatchingSubmissionExists(t *testing.T) {
+func TestResolveScoreResultReturnsPendingWithoutPublicScore(t *testing.T) {
 	t.Parallel()
 
 	submission := &SubmissionResult{
-		Competition: "playground-series-s6e2",
-		FileName:    "submission.csv",
-		Message:     "kgh submit target=exp142 kernel=yourname/exp142",
-		AttemptedAt: time.Unix(5, 0),
+		Competition:  "playground-series-s6e2",
+		FileName:     "submission.csv",
+		Message:      "kgh submit target=exp142 kernel=yourname/exp142",
+		AttemptedAt:  time.Unix(5, 0),
+		SubmissionID: "sub-5",
 	}
 
-	result := resolveScoreResult("playground-series-s6e2", submission, []kaggle.CompetitionSubmission{
-		{
-			Description: "different submission",
-			FileName:    "submission.csv",
-			Status:      "complete",
-			PublicScore: "0.12345",
-			SubmittedAt: time.Unix(20, 0),
-		},
+	result := resolveScoreResult("playground-series-s6e2", submission, kaggle.CompetitionSubmission{
+		Ref:         "sub-5",
+		FileName:    "submission.csv",
+		Description: "kgh submit target=exp142 kernel=yourname/exp142",
+		Status:      "pending",
+		SubmittedAt: time.Unix(20, 0),
 	})
 	if result == nil {
 		t.Fatal("expected a score result")
 	}
-	if result.State != ScoreStateNotFound {
-		t.Fatalf("expected not_found score state, got %+v", result)
+	if result.State != ScoreStatePending {
+		t.Fatalf("expected pending score state, got %+v", result)
 	}
-	if result.PublicScore != "" || result.Status != "" {
+	if result.SubmissionID != "sub-5" || result.PublicScore != "" || result.Status != "pending" {
 		t.Fatalf("unexpected score result %+v", result)
 	}
 }
