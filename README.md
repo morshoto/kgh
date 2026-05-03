@@ -8,32 +8,56 @@
 
 # kgh
 
-`kgh` is a GitHub-native tool for Kaggle workflows.
+`kgh` is a GitHub-native CLI for Kaggle workflows. It resolves a named target from repository config, prepares a Kaggle kernel run, and can optionally submit the resulting artifact to a Kaggle competition.
 
-### Quick start
+The local CLI is dry-run first by default, so you can inspect the resolved execution JSON before you run anything on Kaggle.
+
+## Installation
+
+You can install via build binaries or release artifacts which are published on [GitHub Releases](https://github.com/morshoto/kgh/releases). You can run without installation as well.
 
 ```bash
-# Running tests
-go test ./...
-# Generating kgh build binary
+# Build from source
 go build ./cmd/kgh
-# CLI entrypoint for that path
-go run ./cmd/kgh/main.go kgh github run
+# Run without installing
+go run ./cmd/kgh
 ```
-
-For local debugging, keep using the explicit target path. Create `.kgh/config.yaml` from `.kgh/config_example.yaml`
 
 ### Nix
 
 ```bash
-# Enter the development shell
 nix develop
-
-# Build the kgh package
 nix build
-
-# Run deterministic package, test, vet, and format checks
 nix flake check
 ```
 
-The dev shell includes Go, Python, and the Kaggle CLI. Kaggle-authenticated smoke flows still require your own credentials and are not part of `nix flake check`.
+## Quick Start
+
+Requirements:
+
+- Go 1.25.x if you are building from source
+- Kaggle CLI and Kaggle credentials for live runs
+- access to the competition and datasets referenced by your target
+
+Run one happy path locally:
+
+```bash
+cp .kgh/config_example.yaml .kgh/config.yaml
+go run ./cmd/kgh run --target issue7-e2e
+go run ./cmd/kgh run --target issue7-e2e --dry-run=false
+```
+
+The first command resolves the target and prints dry-run JSON. The second performs a live Kaggle workflow.
+
+## Further Docs
+
+- [Documentation index](./doc/README.md)
+- [Setup guide](./doc/setup.md)
+- [Config guide](./doc/config.md)
+- [Local run guide](./doc/local-run.md)
+- [GitHub trigger guide](./doc/github-trigger.md)
+- [Contributing](./CONTRIBUTING.md)
+
+## Development
+
+For contributor workflow, validation commands, and repository conventions, see [CONTRIBUTING.md](./CONTRIBUTING.md).
