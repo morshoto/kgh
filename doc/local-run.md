@@ -65,3 +65,6 @@ Live mode returns a richer JSON report that can include:
 - poll status and terminal state
 - downloaded output paths
 - submission result when `submit: true`
+
+When `submit: true` succeeds, the live JSON includes structured submission metadata under
+`submission` and `score`, including `submission_id`, `status`, and `submitted_at`.
