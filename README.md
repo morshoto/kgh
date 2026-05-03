@@ -26,7 +26,20 @@ go build ./cmd/kgh
 ./kgh version
 ```
 
-To run a target locally, create `.kgh/config.yaml` from `.kgh/config_example.yaml` and then:
+The primary CI path is the GitHub commit trigger. In GitHub Actions, `kgh` reads the checked-out head commit message and looks for exactly one command in this form:
+
+```text
+submit: <target> [gpu=<bool>] [internet=<bool>]
+```
+
+The CLI entrypoint for that path is:
+
+```bash
+./kgh github run
+./kgh github run --dry-run=false
+```
+
+For local debugging, keep using the explicit target path. Create `.kgh/config.yaml` from `.kgh/config_example.yaml` and then:
 
 ```bash
 ./kgh run --target issue7-e2e
@@ -38,6 +51,21 @@ To run a target locally, create `.kgh/config.yaml` from `.kgh/config_example.yam
 ```bash
 ./kgh run --target issue7-e2e --dry-run=false --poll-interval=2s --timeout=5m
 ```
+
+Live runs return a structured JSON report. The output retrieval stage exposes a
+stable handoff under `outputs` for downstream submit and reporting logic,
+including:
+
+- `output_dir`
+- `submission_path`
+- `metrics_path`
+- per-file `submission` and `metrics` objects with explicit presence/error state
+- `validation.missing_required` and `validation.missing_optional`
+
+This lets later steps consume canonical paths directly instead of re-discovering
+files from the downloaded Kaggle output directory.
+
+The repository includes a PR workflow at [`.github/workflows/commit-trigger.yml`](.github/workflows/commit-trigger.yml) that checks the head commit for `submit:` and invokes `kgh github run` only when a trigger is present.
 
 ### Issue 7 live verification
 
@@ -61,6 +89,7 @@ Verification commands:
 ```bash
 go run ./cmd/kgh/main.go kgh run --target issue7-e2e --dry-run
 go run ./cmd/kgh/main.go kgh run --target issue7-e2e --dry-run=false --poll-interval=2s --timeout=5m
+go run ./cmd/kgh/main.go kgh github run
 kaggle kernels status bloodymonday/issue7-e2e
 ```
 

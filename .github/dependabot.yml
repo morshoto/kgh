@@ -4,9 +4,7 @@ updates:
       directory: /
       schedule:
           interval: daily
-
-    # Enable version updates for Docker in the backend directory (if applicable)
-    - package-ecosystem: 'docker'
-      directory: '/'
+    - package-ecosystem: github-actions
+      directory: /
       schedule:
           interval: daily

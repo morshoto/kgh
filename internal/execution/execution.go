@@ -73,6 +73,8 @@ type PollResult struct {
 	Raw        kaggle.KernelStatusRawStatus   `json:"raw,omitempty"`
 }
 
+// OutputsResult is the stable handoff contract for downstream submit and
+// reporting steps after kernel outputs have been downloaded and validated.
 type OutputsResult struct {
 	OutputDir      string                 `json:"output_dir"`
 	SubmissionPath string                 `json:"submission_path"`
@@ -82,12 +84,29 @@ type OutputsResult struct {
 	Validation     OutputValidationResult `json:"validation"`
 }
 
+type SubmissionResult struct {
+	Enabled        bool      `json:"enabled"`
+	Skipped        bool      `json:"skipped"`
+	Competition    string    `json:"competition,omitempty"`
+	FilePath       string    `json:"file_path,omitempty"`
+	Message        string    `json:"message,omitempty"`
+	Submitted      bool      `json:"submitted"`
+	Reason         string    `json:"reason,omitempty"`
+	Status         string    `json:"status,omitempty"`
+	PublicScore    string    `json:"public_score,omitempty"`
+	SubmittedAt    time.Time `json:"submitted_at,omitempty"`
+	ScoreRetrieved bool      `json:"score_retrieved"`
+	ScoreReason    string    `json:"score_reason,omitempty"`
+}
+
 type OutputValidationResult struct {
 	Valid           bool     `json:"valid"`
 	MissingRequired []string `json:"missing_required"`
 	MissingOptional []string `json:"missing_optional"`
 }
 
+// OutputFileResult records the configured and resolved state of one expected
+// output file so downstream consumers do not need to re-scan the output dir.
 type OutputFileResult struct {
 	ConfiguredPath string `json:"configured_path"`
 	ExpectedPath   string `json:"expected_path"`
@@ -393,6 +412,10 @@ func effectivePollTimeout(requested, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return 30 * time.Minute
+}
+
+func submissionMessage(targetName, kernelRef string) string {
+	return fmt.Sprintf("kgh target=%s kernel=%s", targetName, kernelRef)
 }
 
 const outputTempPrefix = "kgh-kernel-output-*"
