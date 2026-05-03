@@ -1,0 +1,50 @@
+# GitHub Trigger
+
+Use `kgh github run` when execution should be resolved from GitHub commit metadata instead of a direct `--target` flag.
+
+## Trigger Syntax
+
+The supported commit-message command is:
+
+```text
+submit: <target> [gpu=<bool>] [internet=<bool>]
+```
+
+Examples:
+
+```text
+submit: exp142
+submit: exp142 gpu=false
+submit: exp142 internet=true
+submit: exp142 gpu=false internet=true
+```
+
+`kgh` supports one target per trigger. Malformed syntax or multiple commands are treated as errors.
+
+## CLI Usage
+
+```bash
+kgh github run
+```
+
+This command resolves the target from GitHub context and then follows the same dry-run or live execution path as a local run.
+
+## Environment
+
+`kgh github run` is intended for GitHub Actions and relies on these environment variables:
+
+- `GITHUB_EVENT_NAME`
+- `GITHUB_EVENT_PATH`
+- `GITHUB_SHA`
+- `GITHUB_WORKSPACE`
+
+Use built-in help to inspect the current contract:
+
+```bash
+go run ./cmd/kgh github help
+```
+
+## When To Use It
+
+- use `kgh run` for local debugging or explicit target execution
+- use `kgh github run` when commit metadata is the source of truth for the target and runtime overrides

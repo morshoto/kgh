@@ -8,116 +8,56 @@
 
 # kgh
 
-`kgh` is a GitHub-native tool for Kaggle workflows.
+`kgh` is a GitHub-native CLI for Kaggle workflows. It resolves a named target from repository config, prepares a Kaggle kernel run, and can optionally submit the resulting artifact to a Kaggle competition.
 
-### Current status
+The local CLI is dry-run first by default, so you can inspect the resolved execution JSON before you run anything on Kaggle.
 
-This repository currently contains the Milestone 1 project skeleton:
+## Installation
 
-- Go CLI entrypoint at `cmd/kgh`
-- Internal package layout for future implementation
-- Basic Go CI in GitHub Actions
-
-### Quick start
+You can install via build binaries or release artifacts which are published on [GitHub Releases](https://github.com/morshoto/kgh/releases). You can run without installation as well.
 
 ```bash
-go test ./...
+# Build from source
 go build ./cmd/kgh
-./kgh version
+# Run without installing
+go run ./cmd/kgh
 ```
 
-The primary CI path is the GitHub commit trigger. In GitHub Actions, `kgh` reads the checked-out head commit message and looks for exactly one command in this form:
-
-```text
-submit: <target> [gpu=<bool>] [internet=<bool>]
-```
-
-The CLI entrypoint for that path is:
+### Nix
 
 ```bash
-./kgh github run
-./kgh github run --dry-run=false
+nix develop
+nix build
+nix flake check
 ```
 
-For local debugging, keep using the explicit target path. Create `.kgh/config.yaml` from `.kgh/config_example.yaml` and then:
+## Quick Start
+
+Requirements:
+
+- Go 1.25.x if you are building from source
+- Kaggle CLI and Kaggle credentials for live runs
+- access to the competition and datasets referenced by your target
+
+Run one happy path locally:
 
 ```bash
-./kgh run --target issue7-e2e
-./kgh run --target issue7-e2e --dry-run=false
+cp .kgh/config_example.yaml .kgh/config.yaml
+go run ./cmd/kgh run --target issue7-e2e
+go run ./cmd/kgh run --target issue7-e2e --dry-run=false
 ```
 
-`kgh run` defaults to `--dry-run=true`. Live runs poll Kaggle every `5s` for up to `30m`.
+The first command resolves the target and prints dry-run JSON. The second performs a live Kaggle workflow.
 
-```bash
-./kgh run --target issue7-e2e --dry-run=false --poll-interval=2s --timeout=5m
-```
+## Further Docs
 
-Live runs return a structured JSON report. The output retrieval stage exposes a
-stable handoff under `outputs` for downstream submit and reporting logic,
-including:
+- [Documentation index](./doc/README.md)
+- [Setup guide](./doc/setup.md)
+- [Config guide](./doc/config.md)
+- [Local run guide](./doc/local-run.md)
+- [GitHub trigger guide](./doc/github-trigger.md)
+- [Contributing](./CONTRIBUTING.md)
 
-- `output_dir`
-- `submission_path`
-- `metrics_path`
-- per-file `submission` and `metrics` objects with explicit presence/error state
-- `validation.missing_required` and `validation.missing_optional`
+## Development
 
-This lets later steps consume canonical paths directly instead of re-discovering
-files from the downloaded Kaggle output directory.
-
-The repository includes a PR workflow at [`.github/workflows/commit-trigger.yml`](.github/workflows/commit-trigger.yml) that checks the head commit for `submit:` and invokes `kgh github run` only when a trigger is present.
-
-### Issue 7 live verification
-
-Use the committed smoke fixture for repeatable Kaggle verification:
-
-- target config example: `.kgh/config.issue7_example.yaml`
-- notebook fixture: `notebooks/issue7-e2e.ipynb`
-- verified kernel ref: `bloodymonday/issue7-e2e`
-
-Keep `.kgh/config.yaml` local-only. Copy one of the example configs and adjust it for your Kaggle account before running live commands.
-
-Credential setup:
-
-```bash
-export KAGGLE_USERNAME=<username>
-export KAGGLE_KEY=<api-key>
-```
-
-Verification commands:
-
-```bash
-go run ./cmd/kgh/main.go kgh run --target issue7-e2e --dry-run
-go run ./cmd/kgh/main.go kgh run --target issue7-e2e --dry-run=false --poll-interval=2s --timeout=5m
-go run ./cmd/kgh/main.go kgh github run
-kaggle kernels status bloodymonday/issue7-e2e
-```
-
-Manual fallback:
-
-```bash
-kaggle kernels push -p <bundle-dir>
-kaggle kernels status <owner>/<kernel-slug>
-```
-
-### Kaggle smoke test
-
-Use the live smoke path only when you need to validate the adapter against real Kaggle credentials and the Kaggle CLI.
-It is intentionally opt-in and is not part of default CI.
-
-```bash
-export KGH_KAGGLE_SMOKE=1
-export KGH_KAGGLE_SMOKE_COMPETITION=<competition-slug>
-export KAGGLE_API_TOKEN=<token>
-# or:
-# export KAGGLE_USERNAME=<username>
-# export KAGGLE_KEY=<key>
-
-make smoke-kaggle
-```
-
-The smoke test runs a read-only submissions listing through the Kaggle adapter. Use a competition you have access to and have already joined. If you prefer not to use `make`, the equivalent command is:
-
-```bash
-KGH_KAGGLE_SMOKE=1 KGH_KAGGLE_SMOKE_COMPETITION=<competition-slug> go test -tags smoke ./internal/kaggle -run '^TestSmokeKaggleAdapterLive$' -count=1
-```
+For contributor workflow, validation commands, and repository conventions, see [CONTRIBUTING.md](./CONTRIBUTING.md).
