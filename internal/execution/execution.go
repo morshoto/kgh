@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/shotomorisk/kgh/internal/config"
@@ -44,6 +45,7 @@ type Result struct {
 	Poll         *PollResult        `json:"poll,omitempty"`
 	Outputs      *OutputsResult     `json:"outputs,omitempty"`
 	Submission   *SubmissionResult  `json:"submission,omitempty"`
+	Score        *ScoreResult       `json:"score,omitempty"`
 }
 
 type BundleResult struct {
@@ -82,21 +84,6 @@ type OutputsResult struct {
 	Validation     OutputValidationResult `json:"validation"`
 }
 
-type SubmissionResult struct {
-	Enabled        bool      `json:"enabled"`
-	Skipped        bool      `json:"skipped"`
-	Competition    string    `json:"competition,omitempty"`
-	FilePath       string    `json:"file_path,omitempty"`
-	Message        string    `json:"message,omitempty"`
-	Submitted      bool      `json:"submitted"`
-	Reason         string    `json:"reason,omitempty"`
-	Status         string    `json:"status,omitempty"`
-	PublicScore    string    `json:"public_score,omitempty"`
-	SubmittedAt    time.Time `json:"submitted_at,omitempty"`
-	ScoreRetrieved bool      `json:"score_retrieved"`
-	ScoreReason    string    `json:"score_reason,omitempty"`
-}
-
 type OutputValidationResult struct {
 	Valid           bool     `json:"valid"`
 	MissingRequired []string `json:"missing_required"`
@@ -113,6 +100,32 @@ type OutputFileResult struct {
 	Required       bool   `json:"required"`
 	Error          string `json:"error"`
 }
+
+type SubmissionResult struct {
+	Attempted   bool      `json:"attempted"`
+	Submitted   bool      `json:"submitted"`
+	Competition string    `json:"competition"`
+	FilePath    string    `json:"file_path"`
+	FileName    string    `json:"file_name"`
+	Message     string    `json:"message"`
+	AttemptedAt time.Time `json:"attempted_at"`
+}
+
+type ScoreResult struct {
+	State       string    `json:"state"`
+	Competition string    `json:"competition"`
+	FileName    string    `json:"file_name"`
+	Message     string    `json:"message"`
+	Status      string    `json:"status,omitempty"`
+	PublicScore string    `json:"public_score,omitempty"`
+	SubmittedAt time.Time `json:"submitted_at,omitempty"`
+}
+
+const (
+	ScoreStateReady    = "ready"
+	ScoreStatePending  = "pending"
+	ScoreStateNotFound = "not_found"
+)
 
 type Duration time.Duration
 
@@ -137,6 +150,7 @@ type Runner struct {
 	adapter      Adapter
 	pollTimeout  time.Duration
 	pollInterval time.Duration
+	now          func() time.Time
 }
 
 func NewRunner(adapter Adapter) *Runner {
@@ -148,6 +162,7 @@ func NewRunner(adapter Adapter) *Runner {
 		adapter:      adapter,
 		pollTimeout:  30 * time.Minute,
 		pollInterval: 5 * time.Second,
+		now:          time.Now,
 	}
 }
 
@@ -157,6 +172,9 @@ func (r *Runner) Execute(ctx context.Context, req Request) (Result, error) {
 	}
 	if r.loadConfig == nil {
 		r.loadConfig = config.Load
+	}
+	if r.now == nil {
+		r.now = time.Now
 	}
 	if req.ConfigPath == "" {
 		req.ConfigPath = DefaultConfigPath
@@ -268,107 +286,100 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 	}
 	report.Outputs = &outputs
 
-	submission, err := r.submitOutputs(ctx, execSpec, pushResp.KernelRef, outputs)
-	report.Submission = &submission
-	if err != nil {
-		return report, err
-	}
-
-	return report, nil
-}
-
-func (r *Runner) submitOutputs(ctx context.Context, execSpec spec.ExecutionSpec, kernelRef string, outputs OutputsResult) (SubmissionResult, error) {
 	if !execSpec.Submit {
-		return SubmissionResult{
-			Enabled:     false,
-			Skipped:     true,
-			Competition: execSpec.Competition,
-			Reason:      "submission disabled for target",
-		}, nil
-	}
-
-	result := SubmissionResult{
-		Enabled:     true,
-		Competition: execSpec.Competition,
-		FilePath:    outputs.Submission.Path,
-		Message:     submissionMessage(execSpec.TargetName, kernelRef),
+		return report, nil
 	}
 	if !outputs.Submission.Present {
-		result.Reason = outputs.Submission.Error
-		return result, fmt.Errorf("submit enabled but submission artifact is missing: %s", outputs.Submission.Error)
+		return report, fmt.Errorf("submit enabled but submission artifact is missing: %s", outputs.Submission.Error)
 	}
 
-	resp, err := r.adapter.SubmitCompetition(ctx, kaggle.CompetitionSubmitRequest{
+	submissionAttemptedAt := r.now().UTC()
+	submitMessage := buildCompetitionSubmitMessage(execSpec, pushResp.KernelRef)
+	submitResp, err := r.adapter.SubmitCompetition(ctx, kaggle.CompetitionSubmitRequest{
 		Competition: execSpec.Competition,
 		FilePath:    outputs.Submission.Path,
-		Message:     result.Message,
+		Message:     submitMessage,
 	})
 	if err != nil {
-		return result, fmt.Errorf("submit kaggle competition: %w", err)
+		return report, fmt.Errorf("submit kaggle competition: %w", err)
 	}
-
-	result.Competition = resp.Competition
-	result.Submitted = resp.Submitted
+	report.Submission = &SubmissionResult{
+		Attempted:   true,
+		Submitted:   submitResp.Submitted,
+		Competition: submitResp.Competition,
+		FilePath:    outputs.Submission.Path,
+		FileName:    filepath.Base(outputs.Submission.Path),
+		Message:     submitMessage,
+		AttemptedAt: submissionAttemptedAt,
+	}
 
 	submissionsResp, err := r.adapter.ListCompetitionSubmissions(ctx, kaggle.CompetitionSubmissionsRequest{
 		Competition: execSpec.Competition,
 	})
 	if err != nil {
-		result.ScoreReason = "list competition submissions"
-		return result, fmt.Errorf("retrieve latest public score: %w", err)
+		return report, fmt.Errorf("list kaggle competition submissions: %w", err)
 	}
+	report.Score = resolveScoreResult(execSpec.Competition, report.Submission, submissionsResp.Submissions)
 
-	scoreResult, err := resolveLatestRelevantSubmission(result.Message, submissionsResp.Submissions)
-	result.Status = scoreResult.Status
-	result.PublicScore = scoreResult.PublicScore
-	result.SubmittedAt = scoreResult.SubmittedAt
-	result.ScoreRetrieved = scoreResult.ScoreRetrieved
-	result.ScoreReason = scoreResult.ScoreReason
-	if err != nil {
-		return result, fmt.Errorf("retrieve latest public score: %w", err)
-	}
-
-	return result, nil
+	return report, nil
 }
 
-func resolveLatestRelevantSubmission(message string, submissions []kaggle.CompetitionSubmission) (SubmissionResult, error) {
-	var latestMatch *kaggle.CompetitionSubmission
-	var latestScored *kaggle.CompetitionSubmission
+func buildCompetitionSubmitMessage(execSpec spec.ExecutionSpec, kernelRef string) string {
+	return fmt.Sprintf("kgh submit target=%s kernel=%s", execSpec.TargetName, kernelRef)
+}
 
-	for i := range submissions {
-		submission := &submissions[i]
-		if submission.Description != message {
+func resolveScoreResult(competition string, submission *SubmissionResult, rows []kaggle.CompetitionSubmission) *ScoreResult {
+	if submission == nil {
+		return nil
+	}
+
+	score := &ScoreResult{
+		State:       ScoreStateNotFound,
+		Competition: competition,
+		FileName:    submission.FileName,
+		Message:     submission.Message,
+	}
+
+	match, ok := findRelevantSubmission(*submission, rows)
+	if !ok {
+		return score
+	}
+
+	score.Status = strings.TrimSpace(match.Status)
+	score.PublicScore = strings.TrimSpace(match.PublicScore)
+	score.SubmittedAt = match.SubmittedAt
+	if score.PublicScore != "" {
+		score.State = ScoreStateReady
+		return score
+	}
+
+	score.State = ScoreStatePending
+	return score
+}
+
+func findRelevantSubmission(submission SubmissionResult, rows []kaggle.CompetitionSubmission) (kaggle.CompetitionSubmission, bool) {
+	var (
+		best  kaggle.CompetitionSubmission
+		found bool
+	)
+
+	for _, row := range rows {
+		if strings.TrimSpace(row.Description) != submission.Message {
 			continue
 		}
-
-		if latestMatch == nil || submission.SubmittedAt.After(latestMatch.SubmittedAt) {
-			latestMatch = submission
+		if strings.TrimSpace(row.FileName) != submission.FileName {
+			continue
 		}
-		if submission.PublicScore != "" && (latestScored == nil || submission.SubmittedAt.After(latestScored.SubmittedAt)) {
-			latestScored = submission
+		if row.SubmittedAt.IsZero() || row.SubmittedAt.Before(submission.AttemptedAt) {
+			continue
+		}
+		if !found || row.SubmittedAt.After(best.SubmittedAt) {
+			best = row
+			found = true
 		}
 	}
 
-	if latestMatch == nil {
-		return SubmissionResult{
-			ScoreReason: "no matching Kaggle submission found for current run",
-		}, fmt.Errorf("no matching Kaggle submission found for current run")
-	}
-
-	if latestScored == nil {
-		return SubmissionResult{
-			Status:      latestMatch.Status,
-			SubmittedAt: latestMatch.SubmittedAt,
-			ScoreReason: "matching Kaggle submission has no public score yet",
-		}, fmt.Errorf("matching Kaggle submission has no public score yet")
-	}
-
-	return SubmissionResult{
-		Status:         latestScored.Status,
-		PublicScore:    latestScored.PublicScore,
-		SubmittedAt:    latestScored.SubmittedAt,
-		ScoreRetrieved: true,
-	}, nil
+	return best, found
 }
 
 func effectivePollInterval(requested, fallback time.Duration) time.Duration {
@@ -389,10 +400,6 @@ func effectivePollTimeout(requested, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return 30 * time.Minute
-}
-
-func submissionMessage(targetName, kernelRef string) string {
-	return fmt.Sprintf("kgh target=%s kernel=%s", targetName, kernelRef)
 }
 
 const outputTempPrefix = "kgh-kernel-output-*"
