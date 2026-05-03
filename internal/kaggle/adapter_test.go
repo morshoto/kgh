@@ -359,11 +359,11 @@ func TestCLIAdapterListCompetitionSubmissions(t *testing.T) {
 	fake := &adapterFakeClient{
 		t: t,
 		runFn: func(_ context.Context, args []string, opts RunOptions) (Result, error) {
-			if !equalStrings(args, []string{"competitions", "submissions", "-c", "playground-series-s6e2"}) {
+			if !equalStrings(args, []string{"competitions", "submissions", "-c", "playground-series-s6e2", "-v"}) {
 				t.Fatalf("unexpected args %#v", args)
 			}
 			assertZeroRunOptions(t, opts)
-			return Result{Stdout: "file,description,date,status,publicScore\nsubmission.csv,submit from PR #12,2026-04-14T10:00:00Z,complete,0.12345\n"}, nil
+			return Result{Stdout: "ref,file,description,date,status,publicScore\n123,submission.csv,submit from PR #12,2026-04-14T10:00:00Z,complete,0.12345\n"}, nil
 		},
 	}
 
@@ -376,7 +376,7 @@ func TestCLIAdapterListCompetitionSubmissions(t *testing.T) {
 	if len(resp.Submissions) != 1 {
 		t.Fatalf("expected one submission, got %+v", resp.Submissions)
 	}
-	if resp.Submissions[0].FileName != "submission.csv" || resp.Submissions[0].PublicScore != "0.12345" {
+	if resp.Submissions[0].Ref != "123" || resp.Submissions[0].FileName != "submission.csv" || resp.Submissions[0].PublicScore != "0.12345" {
 		t.Fatalf("unexpected submission %+v", resp.Submissions[0])
 	}
 }
@@ -456,7 +456,7 @@ func TestCLIAdapterForwardsDebugFlag(t *testing.T) {
 				})
 				return err
 			},
-			want: []string{"competitions", "submissions", "-c", "playground-series-s6e2"},
+			want: []string{"competitions", "submissions", "-c", "playground-series-s6e2", "-v"},
 		},
 	}
 
@@ -480,7 +480,7 @@ func TestCLIAdapterForwardsDebugFlag(t *testing.T) {
 					case "push kernel":
 						return Result{Stdout: "Kernel URL: https://www.kaggle.com/code/alice/exp142\nKernel pushed successfully\n"}, nil
 					case "list competition submissions":
-						return Result{Stdout: "file,description,date,status,publicScore\nsubmission.csv,submit from PR #12,2026-04-14T10:00:00Z,complete,0.12345\n"}, nil
+						return Result{Stdout: "ref,file,description,date,status,publicScore\n123,submission.csv,submit from PR #12,2026-04-14T10:00:00Z,complete,0.12345\n"}, nil
 					default:
 						return Result{}, nil
 					}
@@ -626,7 +626,7 @@ func TestCLIAdapterReportsMalformedSubmissionDate(t *testing.T) {
 		t: t,
 		runFn: func(_ context.Context, _ []string, _ RunOptions) (Result, error) {
 			return Result{
-				Stdout: "file,description,date,status,publicScore\nsubmission.csv,submit,not-a-date,complete,0.12345\n",
+				Stdout: "ref,file,description,date,status,publicScore\n123,submission.csv,submit,not-a-date,complete,0.12345\n",
 			}, nil
 		},
 	}
@@ -938,7 +938,7 @@ func TestBuildCompetitionSubmissionsCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if !equalStrings(got, []string{"competitions", "submissions", "-c", "playground-series-s6e2"}) {
+	if !equalStrings(got, []string{"competitions", "submissions", "-c", "playground-series-s6e2", "-v"}) {
 		t.Fatalf("unexpected args %#v", got)
 	}
 }
