@@ -22,3 +22,18 @@ go run ./cmd/kgh/main.go kgh github run
 ```
 
 For local debugging, keep using the explicit target path. Create `.kgh/config.yaml` from `.kgh/config_example.yaml`
+
+### Nix
+
+```bash
+# Enter the development shell
+nix develop
+
+# Build the kgh package
+nix build
+
+# Run deterministic package, test, vet, and format checks
+nix flake check
+```
+
+The dev shell includes Go, Python, and the Kaggle CLI. Kaggle-authenticated smoke flows still require your own credentials and are not part of `nix flake check`.
