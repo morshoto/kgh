@@ -84,21 +84,6 @@ type OutputsResult struct {
 	Validation     OutputValidationResult `json:"validation"`
 }
 
-type SubmissionResult struct {
-	Enabled        bool      `json:"enabled"`
-	Skipped        bool      `json:"skipped"`
-	Competition    string    `json:"competition,omitempty"`
-	FilePath       string    `json:"file_path,omitempty"`
-	Message        string    `json:"message,omitempty"`
-	Submitted      bool      `json:"submitted"`
-	Reason         string    `json:"reason,omitempty"`
-	Status         string    `json:"status,omitempty"`
-	PublicScore    string    `json:"public_score,omitempty"`
-	SubmittedAt    time.Time `json:"submitted_at,omitempty"`
-	ScoreRetrieved bool      `json:"score_retrieved"`
-	ScoreReason    string    `json:"score_reason,omitempty"`
-}
-
 type OutputValidationResult struct {
 	Valid           bool     `json:"valid"`
 	MissingRequired []string `json:"missing_required"`
@@ -301,8 +286,11 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 	}
 	report.Outputs = &outputs
 
-	if !execSpec.Submit || !outputs.Submission.Present {
+	if !execSpec.Submit {
 		return report, nil
+	}
+	if !outputs.Submission.Present {
+		return report, fmt.Errorf("submit enabled but submission artifact is missing: %s", outputs.Submission.Error)
 	}
 
 	submissionAttemptedAt := r.now().UTC()
@@ -412,10 +400,6 @@ func effectivePollTimeout(requested, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return 30 * time.Minute
-}
-
-func submissionMessage(targetName, kernelRef string) string {
-	return fmt.Sprintf("kgh target=%s kernel=%s", targetName, kernelRef)
 }
 
 const outputTempPrefix = "kgh-kernel-output-*"
