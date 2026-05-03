@@ -269,6 +269,10 @@ targets:
 	runner.now = func() time.Time {
 		return time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)
 	}
+	runner.sleep = func(context.Context, time.Duration) error {
+		t.Fatal("unexpected sleep during immediate submission lookup")
+		return nil
+	}
 
 	report, err := runner.Execute(context.Background(), Request{
 		Target:       "exp142",
@@ -681,6 +685,10 @@ func TestRunnerExecuteLiveScorePendingWhenMatchedSubmissionHasNoScore(t *testing
 
 	runner := NewRunner(adapter)
 	runner.now = func() time.Time { return time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC) }
+	runner.sleep = func(context.Context, time.Duration) error {
+		t.Fatal("unexpected sleep during immediate submission lookup")
+		return nil
+	}
 
 	report, err := runner.Execute(context.Background(), Request{
 		Target:     "exp142",
@@ -701,10 +709,12 @@ func TestRunnerExecuteLiveScorePendingWhenMatchedSubmissionHasNoScore(t *testing
 	}
 }
 
-func TestRunnerExecuteLiveScoreNotFoundWhenNoSubmissionMatchesCurrentRun(t *testing.T) {
+func TestRunnerExecuteLiveRetriesUntilSubmissionRowAppears(t *testing.T) {
 	t.Parallel()
 
 	configPath := writeLiveConfig(t, true)
+	clock := &executionClock{now: time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)}
+	listCalls := 0
 
 	adapter := &liveAdapter{
 		t: t,
@@ -727,31 +737,56 @@ func TestRunnerExecuteLiveScoreNotFoundWhenNoSubmissionMatchesCurrentRun(t *test
 			return kaggle.CompetitionSubmitResponse{Competition: req.Competition, Submitted: true}, nil
 		},
 		listFn: func(_ context.Context, _ kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error) {
+			listCalls++
+			if listCalls == 1 {
+				return kaggle.CompetitionSubmissionsResponse{
+					Submissions: []kaggle.CompetitionSubmission{{
+						FileName:    "other.csv",
+						Description: "kgh submit target=exp142 kernel=yourname/exp142",
+						Status:      "complete",
+						PublicScore: "0.99999",
+						SubmittedAt: time.Date(2026, 4, 24, 12, 0, 1, 0, time.UTC),
+					}},
+				}, nil
+			}
 			return kaggle.CompetitionSubmissionsResponse{
 				Submissions: []kaggle.CompetitionSubmission{{
-					FileName:    "other.csv",
+					Ref:         "sub-2",
+					FileName:    "submission.csv",
 					Description: "kgh submit target=exp142 kernel=yourname/exp142",
 					Status:      "complete",
 					PublicScore: "0.99999",
-					SubmittedAt: time.Date(2026, 4, 24, 12, 0, 1, 0, time.UTC),
+					SubmittedAt: time.Date(2026, 4, 24, 12, 0, 2, 0, time.UTC),
 				}},
 			}, nil
 		},
 	}
 
 	runner := NewRunner(adapter)
-	runner.now = func() time.Time { return time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC) }
+	runner.now = clock.Now
+	runner.sleep = clock.Sleep
 
 	report, err := runner.Execute(context.Background(), Request{
-		Target:     "exp142",
-		DryRun:     false,
-		ConfigPath: configPath,
+		Target:       "exp142",
+		DryRun:       false,
+		ConfigPath:   configPath,
+		PollInterval: 2 * time.Second,
+		PollTimeout:  15 * time.Second,
 	})
-	if err == nil {
-		t.Fatalf("expected an error, got report %+v", report)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
 	}
-	if got := err.Error(); !strings.Contains(got, "submission metadata unavailable: no matching Kaggle submission row found") {
-		t.Fatalf("unexpected error %q", got)
+	if listCalls != 2 {
+		t.Fatalf("expected two list calls, got %d", listCalls)
+	}
+	if report.Submission == nil || report.Submission.SubmissionID != "sub-2" || report.Submission.Status != "complete" {
+		t.Fatalf("unexpected submission metadata %+v", report.Submission)
+	}
+	if report.Score == nil || report.Score.State != ScoreStateReady {
+		t.Fatalf("unexpected score result %+v", report.Score)
+	}
+	if !equalDurations(clock.sleeps, []time.Duration{2 * time.Second}) {
+		t.Fatalf("unexpected sleep schedule %#v", clock.sleeps)
 	}
 }
 
@@ -782,7 +817,13 @@ func TestRunnerExecuteLiveSubmitFailureReturnsError(t *testing.T) {
 		},
 	}
 
-	_, err := NewRunner(adapter).Execute(context.Background(), Request{
+	runner := NewRunner(adapter)
+	runner.sleep = func(context.Context, time.Duration) error {
+		t.Fatal("unexpected sleep after list failure")
+		return nil
+	}
+
+	_, err := runner.Execute(context.Background(), Request{
 		Target:     "exp142",
 		DryRun:     false,
 		ConfigPath: configPath,
@@ -835,6 +876,72 @@ func TestRunnerExecuteLiveListSubmissionsFailureReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "list kaggle competition submissions") {
 		t.Fatalf("unexpected error %q", err)
+	}
+}
+
+func TestRunnerExecuteLiveSubmissionRowLookupTimesOut(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeLiveConfig(t, true)
+	clock := &executionClock{now: time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)}
+	listCalls := 0
+
+	adapter := &liveAdapter{
+		t: t,
+		pushFn: func(_ context.Context, _ kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
+			return kaggle.PushKernelResponse{KernelRef: "yourname/exp142"}, nil
+		},
+		pollFn: func(_ context.Context, _ kaggle.KernelPollRequest) (kaggle.KernelPollResult, error) {
+			return kaggle.KernelPollResult{
+				KernelStatusResponse: kaggle.KernelStatusResponse{KernelRef: "yourname/exp142", Status: "complete"},
+				Terminal:             kaggle.KernelPollTerminalStateSucceeded,
+			}, nil
+		},
+		downloadFn: func(_ context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "submission.csv"), []byte("id,label\n1,0\n"), 0o644); err != nil {
+				t.Fatalf("write submission output: %v", err)
+			}
+			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
+		},
+		submitFn: func(_ context.Context, req kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+			return kaggle.CompetitionSubmitResponse{Competition: req.Competition, Submitted: true}, nil
+		},
+		listFn: func(_ context.Context, _ kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error) {
+			listCalls++
+			return kaggle.CompetitionSubmissionsResponse{
+				Submissions: []kaggle.CompetitionSubmission{{
+					FileName:    "other.csv",
+					Description: "kgh submit target=exp142 kernel=yourname/exp142",
+					Status:      "complete",
+					PublicScore: "0.99999",
+					SubmittedAt: time.Date(2026, 4, 24, 12, 0, 1, 0, time.UTC),
+				}},
+			}, nil
+		},
+	}
+
+	runner := NewRunner(adapter)
+	runner.now = clock.Now
+	runner.sleep = clock.Sleep
+
+	_, err := runner.Execute(context.Background(), Request{
+		Target:       "exp142",
+		DryRun:       false,
+		ConfigPath:   configPath,
+		PollInterval: 2 * time.Second,
+		PollTimeout:  5 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if got := err.Error(); !strings.Contains(got, "submission metadata unavailable: timed out waiting for Kaggle submission row") {
+		t.Fatalf("unexpected error %q", got)
+	}
+	if listCalls != 3 {
+		t.Fatalf("expected three list calls before timeout, got %d", listCalls)
+	}
+	if !equalDurations(clock.sleeps, []time.Duration{2 * time.Second, 2 * time.Second, 1 * time.Second}) {
+		t.Fatalf("unexpected sleep schedule %#v", clock.sleeps)
 	}
 }
 
@@ -918,6 +1025,10 @@ func TestRunnerExecuteLiveFailsWhenSubmissionMetadataMissingFields(t *testing.T)
 			runner := NewRunner(adapter)
 			runner.now = func() time.Time {
 				return time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)
+			}
+			runner.sleep = func(context.Context, time.Duration) error {
+				t.Fatal("unexpected sleep during immediate metadata validation")
+				return nil
 			}
 
 			_, err := runner.Execute(context.Background(), Request{
@@ -1126,6 +1237,24 @@ type liveAdapter struct {
 	listFn     func(context.Context, kaggle.CompetitionSubmissionsRequest) (kaggle.CompetitionSubmissionsResponse, error)
 }
 
+type executionClock struct {
+	now    time.Time
+	sleeps []time.Duration
+}
+
+func (c *executionClock) Now() time.Time {
+	return c.now
+}
+
+func (c *executionClock) Sleep(_ context.Context, d time.Duration) error {
+	if d < 0 {
+		return fmt.Errorf("negative sleep %s", d)
+	}
+	c.sleeps = append(c.sleeps, d)
+	c.now = c.now.Add(d)
+	return nil
+}
+
 func (a *liveAdapter) PushKernel(ctx context.Context, req kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
 	if a.pushFn == nil {
 		a.t.Fatal("pushFn must be set")
@@ -1159,6 +1288,18 @@ func (a *liveAdapter) ListCompetitionSubmissions(ctx context.Context, req kaggle
 		a.t.Fatal("listFn must be set")
 	}
 	return a.listFn(ctx, req)
+}
+
+func equalDurations(got, want []time.Duration) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func testExecutionSpec() spec.ExecutionSpec {
