@@ -155,6 +155,7 @@ type Runner struct {
 	pollTimeout  time.Duration
 	pollInterval time.Duration
 	now          func() time.Time
+	sleep        func(context.Context, time.Duration) error
 }
 
 func NewRunner(adapter Adapter) *Runner {
@@ -167,6 +168,7 @@ func NewRunner(adapter Adapter) *Runner {
 		pollTimeout:  30 * time.Minute,
 		pollInterval: 5 * time.Second,
 		now:          time.Now,
+		sleep:        sleepContext,
 	}
 }
 
@@ -179,6 +181,9 @@ func (r *Runner) Execute(ctx context.Context, req Request) (Result, error) {
 	}
 	if r.now == nil {
 		r.now = time.Now
+	}
+	if r.sleep == nil {
+		r.sleep = sleepContext
 	}
 	if req.ConfigPath == "" {
 		req.ConfigPath = DefaultConfigPath
@@ -317,15 +322,18 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		AttemptedAt: submissionAttemptedAt,
 	}
 
-	submissionsResp, err := r.adapter.ListCompetitionSubmissions(ctx, kaggle.CompetitionSubmissionsRequest{
-		Competition: execSpec.Competition,
-	})
+	match, err := waitForRelevantSubmission(
+		ctx,
+		r.adapter,
+		execSpec.Competition,
+		*report.Submission,
+		time.Duration(report.PollInterval),
+		time.Duration(report.PollTimeout),
+		r.now,
+		r.sleep,
+	)
 	if err != nil {
-		return report, fmt.Errorf("list kaggle competition submissions: %w", err)
-	}
-	match, ok := findRelevantSubmission(*report.Submission, submissionsResp.Submissions)
-	if !ok {
-		return report, fmt.Errorf("submission metadata unavailable: no matching Kaggle submission row found")
+		return report, err
 	}
 	if err := applySubmissionMetadata(report.Submission, match); err != nil {
 		return report, fmt.Errorf("submission metadata unavailable: %w", err)
@@ -337,6 +345,75 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 
 func buildCompetitionSubmitMessage(execSpec spec.ExecutionSpec, kernelRef string) string {
 	return fmt.Sprintf("kgh submit target=%s kernel=%s", execSpec.TargetName, kernelRef)
+}
+
+func waitForRelevantSubmission(
+	ctx context.Context,
+	adapter Adapter,
+	competition string,
+	submission SubmissionResult,
+	interval, timeout time.Duration,
+	now func() time.Time,
+	sleep func(context.Context, time.Duration) error,
+) (kaggle.CompetitionSubmission, error) {
+	if adapter == nil {
+		return kaggle.CompetitionSubmission{}, fmt.Errorf("list kaggle competition submissions: adapter is nil")
+	}
+	if now == nil {
+		now = time.Now
+	}
+	if sleep == nil {
+		sleep = sleepContext
+	}
+
+	startedAt := now().UTC()
+	deadline := time.Time{}
+	if timeout > 0 {
+		deadline = startedAt.Add(timeout)
+	}
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return kaggle.CompetitionSubmission{}, err
+		}
+		if !deadline.IsZero() && !now().Before(deadline) {
+			return kaggle.CompetitionSubmission{}, fmt.Errorf(
+				"submission metadata unavailable: timed out waiting for Kaggle submission row after %s",
+				timeout,
+			)
+		}
+
+		submissionsResp, err := adapter.ListCompetitionSubmissions(ctx, kaggle.CompetitionSubmissionsRequest{
+			Competition: competition,
+		})
+		if err != nil {
+			return kaggle.CompetitionSubmission{}, fmt.Errorf("list kaggle competition submissions: %w", err)
+		}
+		match, ok := findRelevantSubmission(submission, submissionsResp.Submissions)
+		if ok {
+			return match, nil
+		}
+
+		delay := interval
+		if delay < 0 {
+			delay = 0
+		}
+		if !deadline.IsZero() {
+			remaining := deadline.Sub(now())
+			if remaining < delay {
+				delay = remaining
+			}
+			if delay <= 0 {
+				return kaggle.CompetitionSubmission{}, fmt.Errorf(
+					"submission metadata unavailable: timed out waiting for Kaggle submission row after %s",
+					timeout,
+				)
+			}
+		}
+		if err := sleep(ctx, delay); err != nil {
+			return kaggle.CompetitionSubmission{}, err
+		}
+	}
 }
 
 func resolveScoreResult(competition string, submission *SubmissionResult, match kaggle.CompetitionSubmission) *ScoreResult {
@@ -434,6 +511,21 @@ func effectivePollTimeout(requested, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return 30 * time.Minute
+}
+
+func sleepContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 const outputTempPrefix = "kgh-kernel-output-*"
