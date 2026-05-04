@@ -2,6 +2,15 @@
 
 ## [v0.0.9](https://github.com/morshoto/kgh/compare/v0.0.8...v0.0.9) - 2026-05-03
 - build(deps): bump actions/checkout from 4 to 6 by @dependabot[bot] in https://github.com/morshoto/kgh/pull/83
+- Integrate kaggle PB retrieval into live execution  by @morshoto in https://github.com/morshoto/kgh/pull/87
+- Nix flake for kgh  by @morshoto in https://github.com/morshoto/kgh/pull/88
+- Retrieve and Model Kaggle Public Score After Submission by @morshoto in https://github.com/morshoto/kgh/pull/76
+- Return kaggle submission matadata by @morshoto in https://github.com/morshoto/kgh/pull/89
+- Kaggle submission row lookup after live submit by @morshoto in https://github.com/morshoto/kgh/pull/92
+- Release Wording Correction by @morshoto in https://github.com/morshoto/kgh/pull/93
+
+## [v0.0.9](https://github.com/morshoto/kgh/compare/v0.0.8...v0.0.9) - 2026-05-03
+- build(deps): bump actions/checkout from 4 to 6 by @dependabot[bot] in https://github.com/morshoto/kgh/pull/83
 - Integrate Kaggle score retrieval into live execution result payloads by @morshoto in https://github.com/morshoto/kgh/pull/87
 - Nix flake for kgh  by @morshoto in https://github.com/morshoto/kgh/pull/88
 - Retrieve and model Kaggle public score in live execution results by @morshoto in https://github.com/morshoto/kgh/pull/76
