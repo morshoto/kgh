@@ -18,6 +18,22 @@ import (
 
 var version = "dev"
 
+type executionRunner interface {
+	Execute(context.Context, execution.Request) (execution.Result, error)
+}
+
+var newRunner = func(adapter execution.Adapter) executionRunner {
+	return execution.NewRunner(adapter)
+}
+
+type githubExecutionSummaryWriter interface {
+	WriteExecutionSummary(execution.Result) error
+}
+
+var newGitHubSummaryWriter = func() githubExecutionSummaryWriter {
+	return ghctx.NewSummaryWriter()
+}
+
 func main() {
 	os.Exit(run(os.Args[1:]))
 }
@@ -91,7 +107,7 @@ func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (i
 		ConfigPath:   execution.DefaultConfigPath,
 		PollInterval: flags.pollInterval,
 		PollTimeout:  flags.timeout,
-	}, stdout)
+	}, stdout, stderr, false)
 }
 
 func githubCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
@@ -119,11 +135,11 @@ func githubCommand(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return 1, err
 	}
 
-	return executeRequest(ctx, requestFromTrigger(trigger, flags.sharedRunFlags), stdout)
+	return executeRequest(ctx, requestFromTrigger(trigger, flags.sharedRunFlags), stdout, stderr, true)
 }
 
-func executeRequest(ctx context.Context, req execution.Request, stdout io.Writer) (int, error) {
-	runner := execution.NewRunner(nil)
+func executeRequest(ctx context.Context, req execution.Request, stdout, stderr io.Writer, writeSummary bool) (int, error) {
+	runner := newRunner(nil)
 	report, err := runner.Execute(ctx, req)
 	if err != nil {
 		return 1, err
@@ -136,6 +152,11 @@ func executeRequest(ctx context.Context, req execution.Request, stdout io.Writer
 
 	if _, err := stdout.Write(append(payload, '\n')); err != nil {
 		return 1, err
+	}
+	if writeSummary {
+		if err := newGitHubSummaryWriter().WriteExecutionSummary(report); err != nil && stderr != nil {
+			fmt.Fprintf(stderr, "write GitHub summary: %v\n", err)
+		}
 	}
 	return 0, nil
 }
