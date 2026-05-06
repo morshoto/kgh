@@ -38,6 +38,11 @@ This command resolves the target from GitHub context and then follows the same d
 - `GITHUB_SHA`
 - `GITHUB_WORKSPACE`
 
+For manual `workflow_dispatch` reruns, the GitHub workflow wrapper may also provide:
+
+- `KGH_TRIGGER_SHA`
+- `KGH_PULL_REQUEST_NUMBER`
+
 Use built-in help to inspect the current contract:
 
 ```bash

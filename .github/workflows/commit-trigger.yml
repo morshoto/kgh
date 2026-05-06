@@ -3,35 +3,98 @@ name: Commit Trigger
 on:
     pull_request:
         types: [opened, synchronize, reopened]
+    workflow_dispatch:
+        inputs:
+            pr_number:
+                description: Pull request number to rerun
+                required: true
+                type: string
+            head_sha:
+                description: Optional exact PR head commit SHA to rerun
+                required: false
+                type: string
 
 permissions:
     contents: read
     issues: write
+    pull-requests: read
 
 jobs:
     commit-trigger:
         name: Commit Trigger
-        if: github.event.pull_request.head.repo.full_name == github.repository
         runs-on: ubuntu-latest
         permissions:
             contents: read
             issues: write
+            pull-requests: read
         steps:
-            - uses: actions/checkout@v6
+            - name: Resolve trigger context
+              id: context
+              uses: actions/github-script@v9
               with:
-                  ref: ${{ github.event.pull_request.head.sha }}
+                  github-token: ${{ github.token }}
+                  script: |
+                      const owner = context.repo.owner;
+                      const repo = context.repo.repo;
+                      const repositoryFullName = `${owner}/${repo}`;
+                      let prNumber = '';
+                      let headSha = '';
+                      let sameRepo = true;
+                      let source = 'pull_request';
+
+                      if (context.eventName === 'pull_request') {
+                        prNumber = String(context.payload.pull_request.number);
+                        headSha = context.payload.pull_request.head.sha;
+                        sameRepo = context.payload.pull_request.head.repo.full_name === repositoryFullName;
+                      } else if (context.eventName === 'workflow_dispatch') {
+                        source = 'workflow_dispatch';
+                        prNumber = core.getInput('pr_number', { required: true }).trim();
+                        const requestedHeadSha = core.getInput('head_sha').trim();
+                        const { data: pullRequest } = await github.rest.pulls.get({
+                          owner,
+                          repo,
+                          pull_number: Number(prNumber),
+                        });
+                        sameRepo = pullRequest.head.repo.full_name === repositoryFullName;
+                        headSha = requestedHeadSha || pullRequest.head.sha;
+                        source = requestedHeadSha ? 'workflow_dispatch_exact_sha' : 'workflow_dispatch_pr_head';
+                      } else {
+                        core.setFailed(`unsupported event ${context.eventName}`);
+                        return;
+                      }
+
+                      core.setOutput('pr_number', prNumber);
+                      core.setOutput('head_sha', headSha);
+                      core.setOutput('same_repo', sameRepo ? 'true' : 'false');
+                      core.setOutput('source', source);
+
+            - uses: actions/checkout@v6
+              if: steps.context.outputs.same_repo == 'true'
+              with:
+                  ref: ${{ steps.context.outputs.head_sha }}
 
             - name: Detect submit trigger
               id: trigger
+              if: steps.context.outputs.same_repo == 'true'
               shell: bash
+              env:
+                  KGH_PR_NUMBER: ${{ steps.context.outputs.pr_number }}
+                  KGH_TRIGGER_SOURCE: ${{ steps.context.outputs.source }}
+                  KGH_TRIGGER_SHA: ${{ steps.context.outputs.head_sha }}
               run: |
                   set -euo pipefail
-                  message="$(git show -s --format=%B "${{ github.event.pull_request.head.sha }}")"
+                  message="$(git show -s --format=%B "${KGH_TRIGGER_SHA}")"
                   if grep -Eq '^[[:space:]]*submit:' <<<"$message"; then
                     echo "should_run=true" >> "$GITHUB_OUTPUT"
                     {
                       echo "## kgh commit trigger"
-                      echo "Detected a \`submit:\` command in the head commit message."
+                      if [[ "${KGH_TRIGGER_SOURCE}" == workflow_dispatch_exact_sha ]]; then
+                        echo "Manual rerun for PR #${KGH_PR_NUMBER} is targeting commit \`${KGH_TRIGGER_SHA}\`."
+                      elif [[ "${KGH_TRIGGER_SOURCE}" == workflow_dispatch_pr_head ]]; then
+                        echo "Manual rerun for PR #${KGH_PR_NUMBER} is targeting the current PR head \`${KGH_TRIGGER_SHA}\`."
+                      else
+                        echo "Detected a \`submit:\` command in the head commit message."
+                      fi
                     } >> "$GITHUB_STEP_SUMMARY"
                     exit 0
                   fi
@@ -39,25 +102,43 @@ jobs:
                   echo "should_run=false" >> "$GITHUB_OUTPUT"
                   {
                     echo "## kgh commit trigger"
-                    echo "No \`submit:\` command found in the head commit message. Skipping Kaggle execution."
+                    if [[ "${KGH_TRIGGER_SOURCE}" == workflow_dispatch_exact_sha || "${KGH_TRIGGER_SOURCE}" == workflow_dispatch_pr_head ]]; then
+                      echo "Manual rerun for PR #${KGH_PR_NUMBER} found no \`submit:\` command in commit \`${KGH_TRIGGER_SHA}\`. Skipping Kaggle execution."
+                    else
+                      echo "No \`submit:\` command found in the head commit message. Skipping Kaggle execution."
+                    fi
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+            - name: Skip fork pull requests
+              if: steps.context.outputs.same_repo != 'true'
+              shell: bash
+              env:
+                  KGH_PR_NUMBER: ${{ steps.context.outputs.pr_number }}
+              run: |
+                  set -euo pipefail
+                  {
+                    echo "## kgh commit trigger"
+                    echo "PR #${KGH_PR_NUMBER} comes from a fork repository. Skipping Kaggle execution for safety."
                   } >> "$GITHUB_STEP_SUMMARY"
 
             - name: Set up Go
-              if: steps.trigger.outputs.should_run == 'true'
+              if: steps.context.outputs.same_repo == 'true' && steps.trigger.outputs.should_run == 'true'
               uses: actions/setup-go@v6
               with:
                   go-version-file: go.mod
                   cache: false
 
             - name: Install Kaggle CLI
-              if: steps.trigger.outputs.should_run == 'true'
+              if: steps.context.outputs.same_repo == 'true' && steps.trigger.outputs.should_run == 'true'
               shell: bash
               run: python3 -m pip install --upgrade kaggle
 
             - name: Resolve and execute commit trigger
-              if: steps.trigger.outputs.should_run == 'true'
+              if: steps.context.outputs.same_repo == 'true' && steps.trigger.outputs.should_run == 'true'
               shell: bash
               env:
+                  KGH_PULL_REQUEST_NUMBER: ${{ steps.context.outputs.pr_number }}
+                  KGH_TRIGGER_SHA: ${{ steps.context.outputs.head_sha }}
                   KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
                   KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
                   KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
