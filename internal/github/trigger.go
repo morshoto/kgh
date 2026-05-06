@@ -96,6 +96,12 @@ func (r TriggerResolver) resolveSHA(eventName string) (string, error) {
 			return "", fmt.Errorf("pull_request.head.sha is required for %s events", eventName)
 		}
 		return sha, nil
+	case "workflow_dispatch":
+		sha := strings.TrimSpace(r.Getenv("KGH_TRIGGER_SHA"))
+		if sha == "" {
+			return "", fmt.Errorf("KGH_TRIGGER_SHA is required for workflow_dispatch events")
+		}
+		return sha, nil
 	default:
 		return "", fmt.Errorf("unsupported GitHub event %q", eventName)
 	}

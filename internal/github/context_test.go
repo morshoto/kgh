@@ -57,6 +57,48 @@ func TestReportContextResolverResolveNonPullRequest(t *testing.T) {
 	}
 }
 
+func TestReportContextResolverResolveWorkflowDispatchOverride(t *testing.T) {
+	t.Parallel()
+
+	ctx, err := ReportContextResolver{
+		Getenv: envMap(map[string]string{
+			"GITHUB_EVENT_NAME":       "workflow_dispatch",
+			"GITHUB_REPOSITORY":       "shotomorisk/kgh",
+			"KGH_PULL_REQUEST_NUMBER": "17",
+			"GITHUB_SERVER_URL":       "https://github.example.com",
+			"GITHUB_RUN_ID":           "42",
+		}),
+		ReadFile: os.ReadFile,
+	}.Resolve()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if ctx.PullRequestNumber != 17 {
+		t.Fatalf("unexpected pull request number %d", ctx.PullRequestNumber)
+	}
+	if ctx.RunURL != "https://github.example.com/shotomorisk/kgh/actions/runs/42" {
+		t.Fatalf("unexpected run url %q", ctx.RunURL)
+	}
+}
+
+func TestReportContextResolverRejectsInvalidPullRequestOverride(t *testing.T) {
+	t.Parallel()
+
+	_, err := ReportContextResolver{
+		Getenv: envMap(map[string]string{
+			"GITHUB_EVENT_NAME":       "workflow_dispatch",
+			"KGH_PULL_REQUEST_NUMBER": "abc",
+		}),
+		ReadFile: os.ReadFile,
+	}.Resolve()
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if got := err.Error(); got != "KGH_PULL_REQUEST_NUMBER must be a positive integer" {
+		t.Fatalf("unexpected error %q", got)
+	}
+}
+
 func TestReportContextResolverRejectsMissingPullRequestNumber(t *testing.T) {
 	t.Parallel()
 

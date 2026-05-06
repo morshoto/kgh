@@ -56,13 +56,25 @@ func (r ReportContextResolver) Resolve() (ReportContext, error) {
 		r.Getenv("GITHUB_RUN_ID"),
 	)
 
+	if override := strings.TrimSpace(r.Getenv("KGH_PULL_REQUEST_NUMBER")); override != "" {
+		number, err := strconv.Atoi(override)
+		if err != nil || number <= 0 {
+			return ReportContext{}, fmt.Errorf("KGH_PULL_REQUEST_NUMBER must be a positive integer")
+		}
+		ctx.PullRequestNumber = number
+	}
+
 	switch ctx.EventName {
 	case "pull_request", "pull_request_target":
+		if ctx.PullRequestNumber > 0 {
+			return ctx, nil
+		}
 		number, err := r.resolvePullRequestNumber()
 		if err != nil {
 			return ReportContext{}, err
 		}
 		ctx.PullRequestNumber = number
+	case "workflow_dispatch":
 	case "":
 		return ReportContext{}, fmt.Errorf("GITHUB_EVENT_NAME is required")
 	}
