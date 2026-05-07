@@ -866,16 +866,19 @@ func TestRunnerExecuteLiveListSubmissionsFailureReturnsError(t *testing.T) {
 		},
 	}
 
-	_, err := NewRunner(adapter).Execute(context.Background(), Request{
+	report, err := NewRunner(adapter).Execute(context.Background(), Request{
 		Target:     "exp142",
 		DryRun:     false,
 		ConfigPath: configPath,
 	})
-	if err == nil {
-		t.Fatal("expected an error")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "list kaggle competition submissions") {
-		t.Fatalf("unexpected error %q", err)
+	if report.Submission == nil || !report.Submission.Attempted || !report.Submission.Submitted {
+		t.Fatalf("expected submission attempt details to be preserved, got %+v", report.Submission)
+	}
+	if report.Score == nil || report.Score.State != ScoreStateNotFound {
+		t.Fatalf("expected unavailable score result, got %+v", report.Score)
 	}
 }
 
@@ -924,18 +927,15 @@ func TestRunnerExecuteLiveSubmissionRowLookupTimesOut(t *testing.T) {
 	runner.now = clock.Now
 	runner.sleep = clock.Sleep
 
-	_, err := runner.Execute(context.Background(), Request{
+	report, err := runner.Execute(context.Background(), Request{
 		Target:       "exp142",
 		DryRun:       false,
 		ConfigPath:   configPath,
 		PollInterval: 2 * time.Second,
 		PollTimeout:  5 * time.Second,
 	})
-	if err == nil {
-		t.Fatal("expected an error")
-	}
-	if got := err.Error(); !strings.Contains(got, "submission metadata unavailable: timed out waiting for Kaggle submission row") {
-		t.Fatalf("unexpected error %q", got)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
 	}
 	if listCalls != 3 {
 		t.Fatalf("expected three list calls before timeout, got %d", listCalls)
@@ -943,15 +943,20 @@ func TestRunnerExecuteLiveSubmissionRowLookupTimesOut(t *testing.T) {
 	if !equalDurations(clock.sleeps, []time.Duration{2 * time.Second, 2 * time.Second, 1 * time.Second}) {
 		t.Fatalf("unexpected sleep schedule %#v", clock.sleeps)
 	}
+	if report.Submission == nil || !report.Submission.Attempted || !report.Submission.Submitted {
+		t.Fatalf("expected submission attempt details to be preserved, got %+v", report.Submission)
+	}
+	if report.Score == nil || report.Score.State != ScoreStateNotFound {
+		t.Fatalf("expected unavailable score result, got %+v", report.Score)
+	}
 }
 
 func TestRunnerExecuteLiveFailsWhenSubmissionMetadataMissingFields(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		row         kaggle.CompetitionSubmission
-		wantErrPart string
+		name string
+		row  kaggle.CompetitionSubmission
 	}{
 		{
 			name: "missing submission id",
@@ -962,7 +967,6 @@ func TestRunnerExecuteLiveFailsWhenSubmissionMetadataMissingFields(t *testing.T)
 				PublicScore: "0.12345",
 				SubmittedAt: time.Date(2026, 4, 24, 12, 0, 1, 0, time.UTC),
 			},
-			wantErrPart: "matched Kaggle submission is missing submission ID",
 		},
 		{
 			name: "missing status",
@@ -973,7 +977,6 @@ func TestRunnerExecuteLiveFailsWhenSubmissionMetadataMissingFields(t *testing.T)
 				PublicScore: "0.12345",
 				SubmittedAt: time.Date(2026, 4, 24, 12, 0, 1, 0, time.UTC),
 			},
-			wantErrPart: "matched Kaggle submission is missing status",
 		},
 		{
 			name: "missing timestamp",
@@ -984,7 +987,6 @@ func TestRunnerExecuteLiveFailsWhenSubmissionMetadataMissingFields(t *testing.T)
 				Status:      "complete",
 				PublicScore: "0.12345",
 			},
-			wantErrPart: "matched Kaggle submission is missing timestamp",
 		},
 	}
 
@@ -1031,16 +1033,19 @@ func TestRunnerExecuteLiveFailsWhenSubmissionMetadataMissingFields(t *testing.T)
 				return nil
 			}
 
-			_, err := runner.Execute(context.Background(), Request{
+			report, err := runner.Execute(context.Background(), Request{
 				Target:     "exp142",
 				DryRun:     false,
 				ConfigPath: configPath,
 			})
-			if err == nil {
-				t.Fatal("expected an error")
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
 			}
-			if got := err.Error(); !strings.Contains(got, tt.wantErrPart) {
-				t.Fatalf("unexpected error %q", got)
+			if report.Submission == nil || !report.Submission.Submitted {
+				t.Fatalf("expected submitted result to be preserved, got %+v", report.Submission)
+			}
+			if report.Score == nil || report.Score.State != ScoreStateNotFound {
+				t.Fatalf("expected unavailable score result, got %+v", report.Score)
 			}
 		})
 	}
