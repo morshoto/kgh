@@ -154,8 +154,8 @@ func executeRequest(ctx context.Context, req execution.Request, stdout, stderr i
 		return 1, err
 	}
 	if writeSummary {
-		if err := newGitHubSummaryWriter().WriteExecutionSummary(report); err != nil && stderr != nil {
-			fmt.Fprintf(stderr, "write GitHub summary: %v\n", err)
+		if err := newGitHubSummaryWriter().WriteExecutionSummary(report); err != nil {
+			return 1, fmt.Errorf("write GitHub summary: %w", err)
 		}
 	}
 	return 0, nil

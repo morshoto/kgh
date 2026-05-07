@@ -79,7 +79,7 @@ func TestExecuteRequestWritesJSONAndGitHubSummary(t *testing.T) {
 	}
 }
 
-func TestExecuteRequestSummaryWriteFailureIsNonFatal(t *testing.T) {
+func TestExecuteRequestSummaryWriteFailureIsFatalAfterJSON(t *testing.T) {
 	originalNewRunner := newRunner
 	originalSummaryWriter := newGitHubSummaryWriter
 	t.Cleanup(func() {
@@ -102,17 +102,20 @@ func TestExecuteRequestSummaryWriteFailureIsNonFatal(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code, err := executeRequest(context.Background(), execution.Request{Target: "exp142", DryRun: true}, &stdout, &stderr, true)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	if err == nil {
+		t.Fatal("expected an error")
 	}
-	if code != 0 {
-		t.Fatalf("expected exit code 0, got %d", code)
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
 	}
-	if !strings.Contains(stderr.String(), "write GitHub summary: disk full") {
-		t.Fatalf("expected summary warning on stderr, got %q", stderr.String())
+	if !strings.Contains(err.Error(), "write GitHub summary: disk full") {
+		t.Fatalf("expected wrapped summary error, got %q", err.Error())
 	}
 	if stdout.Len() == 0 {
 		t.Fatal("expected stdout JSON to still be written")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected executeRequest not to write stderr directly, got %q", stderr.String())
 	}
 }
 
@@ -151,5 +154,39 @@ func TestExecuteRequestSkipsSummaryWhenDisabled(t *testing.T) {
 	}
 	if _, err := os.Stat(summaryPath); !os.IsNotExist(err) {
 		t.Fatalf("expected no summary file, stat err=%v", err)
+	}
+}
+
+func TestExecuteRequestIgnoresMissingGitHubStepSummaryEnv(t *testing.T) {
+	originalNewRunner := newRunner
+	t.Cleanup(func() {
+		newRunner = originalNewRunner
+	})
+
+	newRunner = func(execution.Adapter) executionRunner {
+		return fakeExecutionRunner{
+			result: execution.Result{
+				Mode:      execution.ModeDryRun,
+				Execution: spec.ExecutionSpec{TargetName: "exp142"},
+			},
+		}
+	}
+
+	t.Setenv("GITHUB_STEP_SUMMARY", "")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code, err := executeRequest(context.Background(), execution.Request{Target: "exp142", DryRun: true}, &stdout, &stderr, true)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if !strings.Contains(stdout.String(), `"target_name": "exp142"`) {
+		t.Fatalf("expected stdout JSON target, got %s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
 	}
 }
