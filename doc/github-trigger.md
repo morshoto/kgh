@@ -38,10 +38,18 @@ This command resolves the target from GitHub context and then follows the same d
 - `GITHUB_SHA`
 - `GITHUB_WORKSPACE`
 
+The GitHub workflow wrapper is also expected to wire Kaggle credentials from GitHub Actions secrets for live execution:
+
+- `KAGGLE_API_TOKEN`, or
+- both `KAGGLE_USERNAME` and `KAGGLE_KEY`
+
 For manual `workflow_dispatch` reruns, the GitHub workflow wrapper may also provide:
 
 - `KGH_TRIGGER_SHA`
 - `KGH_PULL_REQUEST_NUMBER`
+
+If Kaggle credentials are present, the wrapper runs `kgh github run --dry-run=false`.
+If Kaggle credentials are absent, the wrapper reports that live execution is unsafe and intentionally falls back to dry-run mode.
 
 Use built-in help to inspect the current contract:
 

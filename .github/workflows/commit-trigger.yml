@@ -148,13 +148,14 @@ jobs:
                   if [[ -n "${KAGGLE_API_TOKEN:-}" || ( -n "${KAGGLE_USERNAME:-}" && -n "${KAGGLE_KEY:-}" ) ]]; then
                     {
                       echo "## kgh commit trigger mode"
-                      echo "Running the commit-trigger path in live mode."
+                      echo "Kaggle credentials were loaded from GitHub Actions secrets, so the commit-trigger path is running in live mode."
                     } >> "$GITHUB_STEP_SUMMARY"
                     args+=(--dry-run=false)
                   else
                     {
                       echo "## kgh commit trigger mode"
-                      echo "Kaggle credentials are unavailable, so the commit-trigger path is running in dry-run mode."
+                      echo "No Kaggle credentials were available from GitHub Actions secrets, so live execution is not safe."
+                      echo "The commit-trigger path is intentionally falling back to dry-run mode instead of silently skipping execution."
                     } >> "$GITHUB_STEP_SUMMARY"
                   fi
 
