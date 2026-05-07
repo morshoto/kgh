@@ -39,13 +39,15 @@ jobs:
                       const repositoryFullName = `${owner}/${repo}`;
                       let prNumber = '';
                       let headSha = '';
+                      let headRepository = repositoryFullName;
                       let sameRepo = true;
                       let source = 'pull_request';
 
                       if (context.eventName === 'pull_request') {
                         prNumber = String(context.payload.pull_request.number);
                         headSha = context.payload.pull_request.head.sha;
-                        sameRepo = context.payload.pull_request.head.repo.full_name === repositoryFullName;
+                        headRepository = context.payload.pull_request.head.repo.full_name;
+                        sameRepo = headRepository === repositoryFullName;
                       } else if (context.eventName === 'workflow_dispatch') {
                         source = 'workflow_dispatch';
                         prNumber = core.getInput('pr_number', { required: true }).trim();
@@ -55,7 +57,8 @@ jobs:
                           repo,
                           pull_number: Number(prNumber),
                         });
-                        sameRepo = pullRequest.head.repo.full_name === repositoryFullName;
+                        headRepository = pullRequest.head.repo.full_name;
+                        sameRepo = headRepository === repositoryFullName;
                         headSha = requestedHeadSha || pullRequest.head.sha;
                         source = requestedHeadSha ? 'workflow_dispatch_exact_sha' : 'workflow_dispatch_pr_head';
                       } else {
@@ -65,17 +68,17 @@ jobs:
 
                       core.setOutput('pr_number', prNumber);
                       core.setOutput('head_sha', headSha);
+                      core.setOutput('head_repository', headRepository);
                       core.setOutput('same_repo', sameRepo ? 'true' : 'false');
                       core.setOutput('source', source);
 
             - uses: actions/checkout@v6
-              if: steps.context.outputs.same_repo == 'true'
               with:
+                  repository: ${{ steps.context.outputs.head_repository }}
                   ref: ${{ steps.context.outputs.head_sha }}
 
             - name: Detect submit trigger
               id: trigger
-              if: steps.context.outputs.same_repo == 'true'
               shell: bash
               env:
                   KGH_PR_NUMBER: ${{ steps.context.outputs.pr_number }}
@@ -109,20 +112,8 @@ jobs:
                     fi
                   } >> "$GITHUB_STEP_SUMMARY"
 
-            - name: Skip fork pull requests
-              if: steps.context.outputs.same_repo != 'true'
-              shell: bash
-              env:
-                  KGH_PR_NUMBER: ${{ steps.context.outputs.pr_number }}
-              run: |
-                  set -euo pipefail
-                  {
-                    echo "## kgh commit trigger"
-                    echo "PR #${KGH_PR_NUMBER} comes from a fork repository. Skipping Kaggle execution for safety."
-                  } >> "$GITHUB_STEP_SUMMARY"
-
             - name: Set up Go
-              if: steps.context.outputs.same_repo == 'true' && steps.trigger.outputs.should_run == 'true'
+              if: steps.trigger.outputs.should_run == 'true'
               uses: actions/setup-go@v6
               with:
                   go-version-file: go.mod
@@ -134,18 +125,27 @@ jobs:
               run: python3 -m pip install --upgrade kaggle
 
             - name: Resolve and execute commit trigger
-              if: steps.context.outputs.same_repo == 'true' && steps.trigger.outputs.should_run == 'true'
+              if: steps.trigger.outputs.should_run == 'true'
               shell: bash
               env:
+                  GITHUB_TOKEN: ${{ github.token }}
                   KGH_PULL_REQUEST_NUMBER: ${{ steps.context.outputs.pr_number }}
                   KGH_TRIGGER_SHA: ${{ steps.context.outputs.head_sha }}
                   KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
                   KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
                   KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+                  KGH_SAME_REPO: ${{ steps.context.outputs.same_repo }}
               run: |
                   set -euo pipefail
                   args=(github run)
-                  if [[ -n "${KAGGLE_API_TOKEN:-}" || ( -n "${KAGGLE_USERNAME:-}" && -n "${KAGGLE_KEY:-}" ) ]]; then
+
+                  if [[ "${KGH_SAME_REPO}" != "true" ]]; then
+                    {
+                      echo "## kgh commit trigger mode"
+                      echo "This PR comes from a fork repository, so live Kaggle execution is not allowed."
+                      echo "The commit-trigger path is running in dry-run mode to validate trigger parsing and execution planning safely."
+                    } >> "$GITHUB_STEP_SUMMARY"
+                  elif [[ -n "${KAGGLE_API_TOKEN:-}" || ( -n "${KAGGLE_USERNAME:-}" && -n "${KAGGLE_KEY:-}" ) ]]; then
                     {
                       echo "## kgh commit trigger mode"
                       echo "Kaggle credentials were loaded from GitHub Actions secrets, so the commit-trigger path is running in live mode."
@@ -154,9 +154,10 @@ jobs:
                   else
                     {
                       echo "## kgh commit trigger mode"
-                      echo "No Kaggle credentials were available from GitHub Actions secrets, so live execution is not safe."
-                      echo "The commit-trigger path is intentionally falling back to dry-run mode instead of silently skipping execution."
+                      echo "Kaggle credentials are missing, so live Kaggle execution cannot run safely."
+                      echo "Configure KAGGLE_API_TOKEN or KAGGLE_USERNAME/KAGGLE_KEY in repository secrets."
                     } >> "$GITHUB_STEP_SUMMARY"
+                    exit 1
                   fi
 
                   go run ./cmd/kgh/main.go kgh "${args[@]}"
