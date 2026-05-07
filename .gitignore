@@ -36,3 +36,6 @@ kgh
 
 # local kgh config
 .kgh/config.yaml
+
+# Go build cache
+.gocache/

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shotomorisk/kgh/internal/config"
 	"github.com/shotomorisk/kgh/internal/execution"
 	"github.com/shotomorisk/kgh/internal/kaggle"
 	"github.com/shotomorisk/kgh/internal/spec"
@@ -78,6 +79,43 @@ func TestRenderGitHubSummaryLiveSuccess(t *testing.T) {
 	assertContains(t, got, "| Submit Status | submitted |")
 	assertContains(t, got, "| Public Score | 0.12345 |")
 	assertContains(t, got, "submission: `123`")
+}
+
+func TestRenderGitHubPRComment(t *testing.T) {
+	t.Parallel()
+
+	got := RenderGitHubPRComment(execution.Result{
+		Execution: spec.ExecutionSpec{
+			TargetName:  "exp142",
+			Notebook:    "notebooks/exp142.ipynb",
+			KernelID:    "yourname/exp142",
+			KernelRef:   "yourname/exp142",
+			Competition: "playground-series-s6e2",
+			Submit:      true,
+			Resources: config.Resources{
+				GPU:      true,
+				Internet: false,
+			},
+		},
+		Submission: &execution.SubmissionResult{
+			Submitted:    true,
+			SubmissionID: "123",
+			Status:       "complete",
+		},
+		Score: &execution.ScoreResult{
+			State:       execution.ScoreStateReady,
+			PublicScore: "0.12345",
+		},
+	}, GitHubCommentOptions{
+		RunURL: "https://github.com/shotomorisk/kgh/actions/runs/42",
+	})
+
+	assertContains(t, got, "<!-- kgh:run-report -->")
+	assertContains(t, got, "## kgh run report")
+	assertContains(t, got, "| Submission Result | submitted<br>status: complete<br>id: `123` |")
+	assertContains(t, got, "### Resolved Configuration")
+	assertContains(t, got, "| Kernel Ref | `yourname/exp142` |")
+	assertContains(t, got, "[workflow run](https://github.com/shotomorisk/kgh/actions/runs/42)")
 }
 
 func TestRenderGitHubSummaryPendingScore(t *testing.T) {

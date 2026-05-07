@@ -22,11 +22,19 @@ type fakeSummaryWriter struct {
 	err error
 }
 
+type fakeGitHubReporter struct {
+	err error
+}
+
 func (f fakeExecutionRunner) Execute(context.Context, execution.Request) (execution.Result, error) {
 	return f.result, f.err
 }
 
 func (f fakeSummaryWriter) WriteExecutionSummary(execution.Result) error {
+	return f.err
+}
+
+func (f fakeGitHubReporter) WriteExecutionReport(context.Context, execution.Result) error {
 	return f.err
 }
 
@@ -49,10 +57,11 @@ func TestExecuteRequestWritesJSONAndGitHubSummary(t *testing.T) {
 			},
 		}
 	}
-
 	dir := t.TempDir()
 	summaryPath := filepath.Join(dir, "summary.md")
 	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+	t.Setenv("GITHUB_EVENT_NAME", "push")
+	t.Setenv("GITHUB_REPOSITORY", "shotomorisk/kgh")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -81,10 +90,10 @@ func TestExecuteRequestWritesJSONAndGitHubSummary(t *testing.T) {
 
 func TestExecuteRequestSummaryWriteFailureIsFatalAfterJSON(t *testing.T) {
 	originalNewRunner := newRunner
-	originalSummaryWriter := newGitHubSummaryWriter
+	originalReporter := newGitHubReporter
 	t.Cleanup(func() {
 		newRunner = originalNewRunner
-		newGitHubSummaryWriter = originalSummaryWriter
+		newGitHubReporter = originalReporter
 	})
 
 	newRunner = func(execution.Adapter) executionRunner {
@@ -95,8 +104,8 @@ func TestExecuteRequestSummaryWriteFailureIsFatalAfterJSON(t *testing.T) {
 			},
 		}
 	}
-	newGitHubSummaryWriter = func() githubExecutionSummaryWriter {
-		return fakeSummaryWriter{err: errors.New("disk full")}
+	newGitHubReporter = func() githubExecutionReporter {
+		return fakeGitHubReporter{err: errors.New("write GitHub summary: disk full")}
 	}
 
 	var stdout bytes.Buffer
@@ -108,8 +117,8 @@ func TestExecuteRequestSummaryWriteFailureIsFatalAfterJSON(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("expected exit code 1, got %d", code)
 	}
-	if !strings.Contains(err.Error(), "write GitHub summary: disk full") {
-		t.Fatalf("expected wrapped summary error, got %q", err.Error())
+	if !strings.Contains(stderr.String(), "write GitHub summary: disk full") {
+		t.Fatalf("expected reporting warning on stderr, got %q", stderr.String())
 	}
 	if stdout.Len() == 0 {
 		t.Fatal("expected stdout JSON to still be written")
@@ -121,10 +130,10 @@ func TestExecuteRequestSummaryWriteFailureIsFatalAfterJSON(t *testing.T) {
 
 func TestExecuteRequestSkipsSummaryWhenDisabled(t *testing.T) {
 	originalNewRunner := newRunner
-	originalSummaryWriter := newGitHubSummaryWriter
+	originalReporter := newGitHubReporter
 	t.Cleanup(func() {
 		newRunner = originalNewRunner
-		newGitHubSummaryWriter = originalSummaryWriter
+		newGitHubReporter = originalReporter
 	})
 
 	newRunner = func(execution.Adapter) executionRunner {
@@ -135,8 +144,8 @@ func TestExecuteRequestSkipsSummaryWhenDisabled(t *testing.T) {
 			},
 		}
 	}
-	newGitHubSummaryWriter = func() githubExecutionSummaryWriter {
-		return fakeSummaryWriter{err: errors.New("should not be called")}
+	newGitHubReporter = func() githubExecutionReporter {
+		return fakeGitHubReporter{err: errors.New("should not be called")}
 	}
 
 	dir := t.TempDir()

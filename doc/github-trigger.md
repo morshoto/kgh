@@ -38,6 +38,21 @@ This command resolves the target from GitHub context and then follows the same d
 - `GITHUB_SHA`
 - `GITHUB_WORKSPACE`
 
+The GitHub workflow wrapper is also expected to wire Kaggle credentials from GitHub Actions secrets for live execution:
+
+- `KAGGLE_API_TOKEN`, or
+- both `KAGGLE_USERNAME` and `KAGGLE_KEY`
+- `GITHUB_TOKEN` for PR comment reporting
+
+For manual `workflow_dispatch` reruns, the GitHub workflow wrapper may also provide:
+
+- `KGH_TRIGGER_SHA`
+- `KGH_PULL_REQUEST_NUMBER`
+
+If the PR comes from the same repository and Kaggle credentials are present, the wrapper runs `kgh github run --dry-run=false`.
+If the PR comes from a fork, the wrapper fails safely with a clear explanation instead of executing fork-controlled code.
+If the PR comes from the same repository but Kaggle credentials are absent, the wrapper fails clearly instead of silently downgrading a live trigger to dry-run.
+
 Use built-in help to inspect the current contract:
 
 ```bash

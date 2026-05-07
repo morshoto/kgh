@@ -85,7 +85,40 @@ func TestTriggerResolverResolvePullRequestEvent(t *testing.T) {
 	}
 }
 
-func TestTriggerResolverRejectsUnsupportedEvent(t *testing.T) {
+func TestTriggerResolverResolveWorkflowDispatchEvent(t *testing.T) {
+	t.Parallel()
+
+	resolver := TriggerResolver{
+		Getenv: envMap(map[string]string{
+			"GITHUB_EVENT_NAME": "workflow_dispatch",
+			"GITHUB_WORKSPACE":  "/tmp/workspace",
+			"KGH_TRIGGER_SHA":   "feedface",
+		}),
+		ReadFile: os.ReadFile,
+		Runner: fakeRunner{run: func(_ context.Context, cmd execx.Command, opts execx.Options) (execx.Result, error) {
+			if got := strings.Join(cmd.Args, " "); got != "show -s --format=%B --no-patch feedface" {
+				t.Fatalf("unexpected args %q", got)
+			}
+			if opts.Dir != "/tmp/workspace" {
+				t.Fatalf("unexpected workspace %q", opts.Dir)
+			}
+			return execx.Result{Stdout: "submit: exp142 internet=true\n"}, nil
+		}},
+	}
+
+	trigger, err := resolver.Resolve(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if trigger.Target != "exp142" {
+		t.Fatalf("unexpected target %q", trigger.Target)
+	}
+	if trigger.Internet == nil || *trigger.Internet != true {
+		t.Fatalf("expected internet override true, got %+v", trigger.Internet)
+	}
+}
+
+func TestTriggerResolverRejectsMissingWorkflowDispatchSHA(t *testing.T) {
 	t.Parallel()
 
 	_, err := TriggerResolver{
@@ -96,7 +129,23 @@ func TestTriggerResolverRejectsUnsupportedEvent(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	if got := err.Error(); !strings.Contains(got, `unsupported GitHub event "workflow_dispatch"`) {
+	if got := err.Error(); !strings.Contains(got, "KGH_TRIGGER_SHA is required for workflow_dispatch events") {
+		t.Fatalf("unexpected error %q", got)
+	}
+}
+
+func TestTriggerResolverRejectsUnsupportedEvent(t *testing.T) {
+	t.Parallel()
+
+	_, err := TriggerResolver{
+		Getenv: envMap(map[string]string{
+			"GITHUB_EVENT_NAME": "schedule",
+		}),
+	}.Resolve(context.Background())
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if got := err.Error(); !strings.Contains(got, `unsupported GitHub event "schedule"`) {
 		t.Fatalf("unexpected error %q", got)
 	}
 }
