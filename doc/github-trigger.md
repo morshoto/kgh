@@ -50,7 +50,7 @@ For manual `workflow_dispatch` reruns, the GitHub workflow wrapper may also prov
 - `KGH_PULL_REQUEST_NUMBER`
 
 If the PR comes from the same repository and Kaggle credentials are present, the wrapper runs `kgh github run --dry-run=false`.
-If the PR comes from a fork, the wrapper runs `kgh github run` in dry-run mode for safety.
+If the PR comes from a fork, the wrapper fails safely with a clear explanation instead of executing fork-controlled code.
 If the PR comes from the same repository but Kaggle credentials are absent, the wrapper fails clearly instead of silently downgrading a live trigger to dry-run.
 
 Use built-in help to inspect the current contract:
