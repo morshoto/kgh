@@ -333,10 +333,12 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		r.sleep,
 	)
 	if err != nil {
-		return report, err
+		report.Score = unavailableScoreResult(execSpec.Competition, report.Submission)
+		return report, nil
 	}
 	if err := applySubmissionMetadata(report.Submission, match); err != nil {
-		return report, fmt.Errorf("submission metadata unavailable: %w", err)
+		report.Score = unavailableScoreResult(execSpec.Competition, report.Submission)
+		return report, nil
 	}
 	report.Score = resolveScoreResult(execSpec.Competition, report.Submission, match)
 
@@ -438,6 +440,20 @@ func resolveScoreResult(competition string, submission *SubmissionResult, match 
 
 	score.State = ScoreStatePending
 	return score
+}
+
+func unavailableScoreResult(competition string, submission *SubmissionResult) *ScoreResult {
+	if submission == nil {
+		return nil
+	}
+
+	return &ScoreResult{
+		State:        ScoreStateNotFound,
+		Competition:  competition,
+		FileName:     submission.FileName,
+		Message:      submission.Message,
+		SubmissionID: submission.SubmissionID,
+	}
 }
 
 func findRelevantSubmission(submission SubmissionResult, rows []kaggle.CompetitionSubmission) (kaggle.CompetitionSubmission, bool) {
