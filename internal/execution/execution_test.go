@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -836,6 +837,59 @@ func TestRunnerExecuteLiveSubmitFailureReturnsError(t *testing.T) {
 	}
 }
 
+func TestRunnerExecuteLiveSubmitFailureReturnsErrorWithPartialResult(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeLiveConfig(t, true)
+
+	adapter := &liveAdapter{
+		t: t,
+		pushFn: func(_ context.Context, _ kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
+			return kaggle.PushKernelResponse{KernelRef: "yourname/exp142"}, nil
+		},
+		pollFn: func(_ context.Context, _ kaggle.KernelPollRequest) (kaggle.KernelPollResult, error) {
+			return kaggle.KernelPollResult{
+				KernelStatusResponse: kaggle.KernelStatusResponse{KernelRef: "yourname/exp142", Status: "complete"},
+				Terminal:             kaggle.KernelPollTerminalStateSucceeded,
+			}, nil
+		},
+		downloadFn: func(_ context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "submission.csv"), []byte("id,label\n1,0\n"), 0o644); err != nil {
+				t.Fatalf("write submission output: %v", err)
+			}
+			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
+		},
+		submitFn: func(_ context.Context, _ kaggle.CompetitionSubmitRequest) (kaggle.CompetitionSubmitResponse, error) {
+			return kaggle.CompetitionSubmitResponse{}, fmt.Errorf("submit failed")
+		},
+	}
+
+	_, err := NewRunner(adapter).Execute(context.Background(), Request{
+		Target:     "exp142",
+		DryRun:     false,
+		ConfigPath: configPath,
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	var reportErr *ErrorWithResult
+	if !errors.As(err, &reportErr) {
+		t.Fatalf("expected error with partial result, got %T", err)
+	}
+	if reportErr.Result.Mode != ModeLive {
+		t.Fatalf("expected live result, got %+v", reportErr.Result)
+	}
+	if reportErr.Result.Push == nil || reportErr.Result.Push.KernelRef != "yourname/exp142" {
+		t.Fatalf("expected pushed kernel ref in partial result, got %+v", reportErr.Result.Push)
+	}
+	if reportErr.Result.Outputs == nil || !reportErr.Result.Outputs.Submission.Present {
+		t.Fatalf("expected outputs in partial result, got %+v", reportErr.Result.Outputs)
+	}
+	if reportErr.Result.Submission != nil {
+		t.Fatalf("expected no submission payload before failed submit, got %+v", reportErr.Result.Submission)
+	}
+}
+
 func TestRunnerExecuteLiveListSubmissionsFailureReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -879,6 +933,83 @@ func TestRunnerExecuteLiveListSubmissionsFailureReturnsError(t *testing.T) {
 	}
 	if report.Score == nil || report.Score.State != ScoreStateNotFound {
 		t.Fatalf("expected unavailable score result, got %+v", report.Score)
+	}
+}
+
+func TestRunnerExecuteLiveMissingRequiredSubmissionFailsValidationReturnsErrorWithPartialResult(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	notebook := filepath.Join(dir, "notebooks", "exp142.ipynb")
+	if err := os.MkdirAll(filepath.Dir(notebook), 0o755); err != nil {
+		t.Fatalf("mkdir notebook dir: %v", err)
+	}
+	if err := os.WriteFile(notebook, []byte(`{"cells":[]}`), 0o644); err != nil {
+		t.Fatalf("write notebook: %v", err)
+	}
+
+	configPath := filepath.Join(dir, ".kgh", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`
+targets:
+  exp142:
+    notebook: `+notebook+`
+    kernel_id: yourname/exp142
+    competition: playground-series-s6e2
+    submit: true
+    resources:
+      private: true
+    outputs:
+      submission: submission.csv
+      metrics: metrics.json
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	adapter := &liveAdapter{
+		t: t,
+		pushFn: func(_ context.Context, _ kaggle.PushKernelRequest) (kaggle.PushKernelResponse, error) {
+			return kaggle.PushKernelResponse{KernelRef: "yourname/exp142"}, nil
+		},
+		pollFn: func(_ context.Context, _ kaggle.KernelPollRequest) (kaggle.KernelPollResult, error) {
+			return kaggle.KernelPollResult{
+				KernelStatusResponse: kaggle.KernelStatusResponse{
+					KernelRef: "yourname/exp142",
+					Status:    "complete",
+				},
+				Terminal: kaggle.KernelPollTerminalStateSucceeded,
+			}, nil
+		},
+		downloadFn: func(_ context.Context, req kaggle.DownloadKernelOutputRequest) (kaggle.DownloadKernelOutputResponse, error) {
+			if err := os.WriteFile(filepath.Join(req.OutputDir, "metrics.json"), []byte(`{"score":0.5}`), 0o644); err != nil {
+				t.Fatalf("write metrics output: %v", err)
+			}
+			return kaggle.DownloadKernelOutputResponse{OutputDir: req.OutputDir}, nil
+		},
+	}
+
+	_, err := NewRunner(adapter).Execute(context.Background(), Request{
+		Target:     "exp142",
+		DryRun:     false,
+		ConfigPath: configPath,
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	var reportErr *ErrorWithResult
+	if !errors.As(err, &reportErr) {
+		t.Fatalf("expected error with partial result, got %T", err)
+	}
+	if reportErr.Result.Outputs == nil {
+		t.Fatalf("expected outputs handoff, got %+v", reportErr.Result)
+	}
+	if reportErr.Result.Outputs.Validation.Valid {
+		t.Fatalf("expected invalid outputs in partial result, got %+v", reportErr.Result.Outputs.Validation)
+	}
+	if reportErr.Result.Outputs.Submission.Present {
+		t.Fatalf("expected missing submission in partial result, got %+v", reportErr.Result.Outputs.Submission)
 	}
 }
 
