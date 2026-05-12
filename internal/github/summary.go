@@ -20,7 +20,7 @@ func NewSummaryWriter() SummaryWriter {
 	}
 }
 
-func (w SummaryWriter) Write(result execution.Result) error {
+func (w SummaryWriter) Write(result execution.Result, failure *execution.FailureSummary) error {
 	if w.Getenv == nil {
 		w.Getenv = os.Getenv
 	}
@@ -32,11 +32,13 @@ func (w SummaryWriter) Write(result execution.Result) error {
 	if path == "" {
 		return nil
 	}
-	return w.AppendFile(path, []byte(reporting.RenderGitHubSummary(result)))
+	return w.AppendFile(path, []byte(reporting.RenderGitHubSummary(result, reporting.GitHubSummaryOptions{
+		Failure: failure,
+	})))
 }
 
-func (w SummaryWriter) WriteExecutionSummary(result execution.Result) error {
-	return w.Write(result)
+func (w SummaryWriter) WriteExecutionSummary(result execution.Result, failure *execution.FailureSummary) error {
+	return w.Write(result, failure)
 }
 
 func appendFile(path string, body []byte) error {

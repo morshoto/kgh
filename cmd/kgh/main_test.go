@@ -26,7 +26,7 @@ func (f fakeExecutionRunner) Execute(context.Context, execution.Request) (execut
 	return f.result, f.err
 }
 
-func (f fakeSummaryWriter) WriteExecutionSummary(execution.Result) error {
+func (f fakeSummaryWriter) WriteExecutionSummary(execution.Result, *execution.FailureSummary) error {
 	return f.err
 }
 
@@ -153,7 +153,8 @@ func TestExecuteRequestWritesGitHubSummaryOnExecutionFailure(t *testing.T) {
 						KernelRef: "yourname/exp142",
 					},
 				},
-				Err: errors.New("submit failed"),
+				Stage: execution.FailureStageSubmit,
+				Err:   errors.New("submit failed"),
 			},
 		}
 	}
@@ -182,10 +183,19 @@ func TestExecuteRequestWritesGitHubSummaryOnExecutionFailure(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("read summary file: %v", readErr)
 	}
-	if !strings.Contains(string(body), "| Target | `exp142` |") {
+	if !strings.Contains(string(body), "### Failure") {
 		t.Fatalf("unexpected summary body:\n%s", string(body))
 	}
-	if !strings.Contains(string(body), "| Kernel ID | `yourname/exp142` |") {
+	if !strings.Contains(string(body), "- Stage: `submit`") {
+		t.Fatalf("unexpected summary body:\n%s", string(body))
+	}
+	if !strings.Contains(string(body), "- Error: submit failed") {
+		t.Fatalf("unexpected summary body:\n%s", string(body))
+	}
+	if !strings.Contains(string(body), "- Target: `exp142`") {
+		t.Fatalf("unexpected summary body:\n%s", string(body))
+	}
+	if !strings.Contains(string(body), "- Kernel ID: `yourname/exp142`") {
 		t.Fatalf("unexpected summary body:\n%s", string(body))
 	}
 	if stderr.Len() != 0 {
