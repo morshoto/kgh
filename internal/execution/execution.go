@@ -24,6 +24,17 @@ const (
 	ModeLive   = "live"
 )
 
+type FailureStage string
+
+const (
+	FailureStagePush             FailureStage = "push"
+	FailureStagePoll             FailureStage = "poll"
+	FailureStageOutputDir        FailureStage = "output-dir"
+	FailureStageDownloadOutput   FailureStage = "download-output"
+	FailureStageOutputValidation FailureStage = "output-validation"
+	FailureStageSubmit           FailureStage = "submit"
+)
+
 type Request struct {
 	Target       string
 	DryRun       bool
@@ -134,8 +145,14 @@ const (
 
 type Duration time.Duration
 
+type FailureSummary struct {
+	Stage FailureStage
+	Error string
+}
+
 type ErrorWithResult struct {
 	Result Result
+	Stage  FailureStage
 	Err    error
 }
 
@@ -159,6 +176,20 @@ func ResultFromError(err error) (Result, bool) {
 		return Result{}, false
 	}
 	return reportErr.Result, true
+}
+
+func FailureSummaryFromError(err error) (*FailureSummary, bool) {
+	var reportErr *ErrorWithResult
+	if !errors.As(err, &reportErr) || reportErr == nil {
+		return nil, false
+	}
+	if reportErr.Stage == "" || reportErr.Err == nil {
+		return nil, false
+	}
+	return &FailureSummary{
+		Stage: reportErr.Stage,
+		Error: reportErr.Err.Error(),
+	}, true
 }
 
 func (d Duration) String() string {
@@ -248,13 +279,14 @@ func (r *Runner) Execute(ctx context.Context, req Request) (Result, error) {
 	return report, nil
 }
 
-func wrapErrorWithResult(report Result, err error, format string, args ...any) error {
+func wrapErrorWithResult(report Result, stage FailureStage, err error, format string, args ...any) error {
 	if err == nil {
 		return nil
 	}
 	args = append(args, err)
 	return &ErrorWithResult{
 		Result: report,
+		Stage:  stage,
 		Err:    fmt.Errorf(format, args...),
 	}
 }
@@ -286,7 +318,7 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		WorkDir: bundle.WorkDir,
 	})
 	if err != nil {
-		return report, wrapErrorWithResult(report, err, "push kaggle kernel: %w")
+		return report, wrapErrorWithResult(report, FailureStagePush, err, "push kaggle kernel: %w")
 	}
 	report.Push = &PushResult{
 		KernelRef: pushResp.KernelRef,
@@ -301,7 +333,7 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		Timeout:   time.Duration(report.PollTimeout),
 	})
 	if err != nil {
-		return report, wrapErrorWithResult(report, err, "poll kaggle kernel: %w")
+		return report, wrapErrorWithResult(report, FailureStagePoll, err, "poll kaggle kernel: %w")
 	}
 	report.Poll = &PollResult{
 		KernelRef:  pollResp.KernelRef,
@@ -317,7 +349,7 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 
 	outputDir, err := createOutputDir()
 	if err != nil {
-		return report, wrapErrorWithResult(report, err, "create output dir: %w")
+		return report, wrapErrorWithResult(report, FailureStageOutputDir, err, "create output dir: %w")
 	}
 
 	downloadResp, err := r.adapter.DownloadKernelOutput(ctx, kaggle.DownloadKernelOutputRequest{
@@ -325,12 +357,12 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		OutputDir: outputDir,
 	})
 	if err != nil {
-		return report, wrapErrorWithResult(report, err, "download kaggle output: %w")
+		return report, wrapErrorWithResult(report, FailureStageDownloadOutput, err, "download kaggle output: %w")
 	}
 
 	outputs, err := buildOutputsResult(execSpec, downloadResp.OutputDir)
 	if err != nil {
-		return report, wrapErrorWithResult(report, err, "build output handoff: %w")
+		return report, wrapErrorWithResult(report, FailureStageDownloadOutput, err, "build output handoff: %w")
 	}
 	report.Outputs = &outputs
 
@@ -338,7 +370,7 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		return report, nil
 	}
 	if !outputs.Submission.Present {
-		return report, wrapErrorWithResult(report, errors.New(outputs.Submission.Error), "submit enabled but submission artifact is missing: %w")
+		return report, wrapErrorWithResult(report, FailureStageOutputValidation, errors.New(outputs.Submission.Error), "submit enabled but submission artifact is missing: %w")
 	}
 
 	submissionAttemptedAt := r.now().UTC()
@@ -349,7 +381,7 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		Message:     submitMessage,
 	})
 	if err != nil {
-		return report, wrapErrorWithResult(report, err, "submit kaggle competition: %w")
+		return report, wrapErrorWithResult(report, FailureStageSubmit, err, "submit kaggle competition: %w")
 	}
 	report.Submission = &SubmissionResult{
 		Attempted:   true,

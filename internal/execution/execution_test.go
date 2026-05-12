@@ -876,6 +876,9 @@ func TestRunnerExecuteLiveSubmitFailureReturnsErrorWithPartialResult(t *testing.
 	if !errors.As(err, &reportErr) {
 		t.Fatalf("expected error with partial result, got %T", err)
 	}
+	if reportErr.Stage != FailureStageSubmit {
+		t.Fatalf("expected submit stage, got %q", reportErr.Stage)
+	}
 	if reportErr.Result.Mode != ModeLive {
 		t.Fatalf("expected live result, got %+v", reportErr.Result)
 	}
@@ -1001,6 +1004,9 @@ targets:
 	var reportErr *ErrorWithResult
 	if !errors.As(err, &reportErr) {
 		t.Fatalf("expected error with partial result, got %T", err)
+	}
+	if reportErr.Stage != FailureStageOutputValidation {
+		t.Fatalf("expected output validation stage, got %q", reportErr.Stage)
 	}
 	if reportErr.Result.Outputs == nil {
 		t.Fatalf("expected outputs handoff, got %+v", reportErr.Result)
