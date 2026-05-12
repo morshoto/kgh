@@ -12,6 +12,7 @@ import (
 )
 
 const commentMarker = "<!-- kgh:run-report -->"
+const commentsPageSize = 100
 
 type httpDoer interface {
 	Do(*http.Request) (*http.Response, error)
@@ -60,27 +61,31 @@ func (w PRCommentWriter) Write(ctx context.Context, reportCtx ReportContext, bod
 }
 
 func (w PRCommentWriter) findExistingCommentID(ctx context.Context, reportCtx ReportContext, token string) (int64, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, w.apiURL()+"/repos/"+reportCtx.RepositoryOwner+"/"+reportCtx.RepositoryName+"/issues/"+fmt.Sprintf("%d", reportCtx.PullRequestNumber)+"/comments", nil)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	for page := 1; ; page++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, w.apiURL()+"/repos/"+reportCtx.RepositoryOwner+"/"+reportCtx.RepositoryName+"/issues/"+fmt.Sprintf("%d", reportCtx.PullRequestNumber)+"/comments?per_page="+fmt.Sprintf("%d", commentsPageSize)+"&page="+fmt.Sprintf("%d", page), nil)
+		if err != nil {
+			return 0, err
+		}
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
-	var comments []struct {
-		ID   int64  `json:"id"`
-		Body string `json:"body"`
-	}
-	if err := w.doJSON(req, &comments); err != nil {
-		return 0, err
-	}
-	for _, comment := range comments {
-		if strings.Contains(comment.Body, commentMarker) {
-			return comment.ID, nil
+		var comments []struct {
+			ID   int64  `json:"id"`
+			Body string `json:"body"`
+		}
+		if err := w.doJSON(req, &comments); err != nil {
+			return 0, err
+		}
+		for _, comment := range comments {
+			if strings.Contains(comment.Body, commentMarker) {
+				return comment.ID, nil
+			}
+		}
+		if len(comments) < commentsPageSize {
+			return 0, nil
 		}
 	}
-	return 0, nil
 }
 
 func (w PRCommentWriter) createComment(ctx context.Context, reportCtx ReportContext, token, body string) error {
