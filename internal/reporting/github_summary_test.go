@@ -145,6 +145,35 @@ func TestRenderGitHubSummaryPendingScore(t *testing.T) {
 	assertContains(t, got, "| Public Score | pending |")
 }
 
+func TestRenderGitHubSummaryLiveFailurePartialResult(t *testing.T) {
+	t.Parallel()
+
+	got := RenderGitHubSummary(execution.Result{
+		Mode: execution.ModeLive,
+		Execution: spec.ExecutionSpec{
+			TargetName:  "exp142",
+			Notebook:    "notebooks/exp142.ipynb",
+			KernelID:    "yourname/exp142",
+			KernelRef:   "yourname/exp142",
+			Competition: "playground-series-s6e2",
+			Submit:      true,
+		},
+		Push: &execution.PushResult{
+			KernelRef: "yourname/exp142",
+		},
+		Poll: &execution.PollResult{
+			Status:   "failed",
+			Terminal: kaggle.KernelPollTerminalStateFailed,
+		},
+	})
+
+	assertContains(t, got, "| Target | `exp142` |")
+	assertContains(t, got, "| Kernel ID | `yourname/exp142` |")
+	assertContains(t, got, "| Run Status | failed |")
+	assertContains(t, got, "| Submit Status | not submitted |")
+	assertContains(t, got, "kernel: `yourname/exp142`")
+}
+
 func TestRenderGitHubSummarySubmissionDisabled(t *testing.T) {
 	t.Parallel()
 
