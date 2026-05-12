@@ -8,6 +8,7 @@ Detailed user documentation for `kgh` lives here.
 - [Config](./config.md): `.kgh/config.yaml` structure, example target, and field meanings
 - [Local Run](./local-run.md): `kgh run`, dry-run vs live mode, and runtime overrides
 - [GitHub Trigger](./github-trigger.md): commit-message trigger syntax and `kgh github run`
+- [Recipes](./recipes/README.md): copy-adaptable examples for common repository workflows
 
 ## Internal Context
 
