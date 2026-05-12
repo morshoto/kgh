@@ -183,10 +183,6 @@ jobs:
                   args=(github run)
 
                   if [[ -n "${KAGGLE_API_TOKEN:-}" || ( -n "${KAGGLE_USERNAME:-}" && -n "${KAGGLE_KEY:-}" ) ]]; then
-                    {
-                      echo "## kgh commit trigger mode"
-                      echo "Kaggle credentials were loaded from GitHub Actions secrets, so the commit-trigger path is running in live mode."
-                    } >> "$GITHUB_STEP_SUMMARY"
                     args+=(--dry-run=false)
                   else
                     {
