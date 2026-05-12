@@ -140,9 +140,13 @@ func githubCommand(ctx context.Context, args []string, stdout, stderr io.Writer)
 
 func executeRequest(ctx context.Context, req execution.Request, stdout, stderr io.Writer, writeSummary bool) (int, error) {
 	runner := newRunner(nil)
-	report, err := runner.Execute(ctx, req)
-	if err != nil {
-		return 1, err
+	report, execErr := runner.Execute(ctx, req)
+	if execErr != nil {
+		if partial, ok := execution.ResultFromError(execErr); ok {
+			report = partial
+		} else {
+			return 1, execErr
+		}
 	}
 
 	payload, err := json.MarshalIndent(report, "", "  ")
@@ -157,6 +161,9 @@ func executeRequest(ctx context.Context, req execution.Request, stdout, stderr i
 		if err := newGitHubSummaryWriter().WriteExecutionSummary(report); err != nil {
 			return 1, fmt.Errorf("write GitHub summary: %w", err)
 		}
+	}
+	if execErr != nil {
+		return 1, execErr
 	}
 	return 0, nil
 }

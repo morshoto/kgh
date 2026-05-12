@@ -120,6 +120,79 @@ func TestExecuteRequestSummaryWriteFailureIsFatalAfterJSON(t *testing.T) {
 	}
 }
 
+func TestExecuteRequestWritesGitHubSummaryOnExecutionFailure(t *testing.T) {
+	originalNewRunner := newRunner
+	t.Cleanup(func() {
+		newRunner = originalNewRunner
+	})
+
+	newRunner = func(execution.Adapter) executionRunner {
+		return fakeExecutionRunner{
+			result: execution.Result{
+				Mode: execution.ModeLive,
+				Execution: spec.ExecutionSpec{
+					TargetName: "exp142",
+					Notebook:   "notebooks/exp142.ipynb",
+					KernelID:   "yourname/exp142",
+					KernelRef:  "yourname/exp142",
+				},
+				Push: &execution.PushResult{
+					KernelRef: "yourname/exp142",
+				},
+			},
+			err: &execution.ErrorWithResult{
+				Result: execution.Result{
+					Mode: execution.ModeLive,
+					Execution: spec.ExecutionSpec{
+						TargetName: "exp142",
+						Notebook:   "notebooks/exp142.ipynb",
+						KernelID:   "yourname/exp142",
+						KernelRef:  "yourname/exp142",
+					},
+					Push: &execution.PushResult{
+						KernelRef: "yourname/exp142",
+					},
+				},
+				Err: errors.New("submit failed"),
+			},
+		}
+	}
+
+	dir := t.TempDir()
+	summaryPath := filepath.Join(dir, "summary.md")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code, err := executeRequest(context.Background(), execution.Request{Target: "exp142", DryRun: false}, &stdout, &stderr, true)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if !strings.Contains(err.Error(), "submit failed") {
+		t.Fatalf("expected wrapped execution error, got %q", err.Error())
+	}
+	if !strings.Contains(stdout.String(), `"target_name": "exp142"`) {
+		t.Fatalf("expected stdout JSON target, got %s", stdout.String())
+	}
+
+	body, readErr := os.ReadFile(summaryPath)
+	if readErr != nil {
+		t.Fatalf("read summary file: %v", readErr)
+	}
+	if !strings.Contains(string(body), "| Target | `exp142` |") {
+		t.Fatalf("unexpected summary body:\n%s", string(body))
+	}
+	if !strings.Contains(string(body), "| Kernel ID | `yourname/exp142` |") {
+		t.Fatalf("unexpected summary body:\n%s", string(body))
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected executeRequest not to write stderr directly, got %q", stderr.String())
+	}
+}
+
 func TestExecuteRequestSkipsSummaryWhenDisabled(t *testing.T) {
 	originalNewRunner := newRunner
 	originalSummaryWriter := newGitHubSummaryWriter
