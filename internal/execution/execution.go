@@ -27,16 +27,17 @@ const (
 type FailureStage string
 
 const (
-	FailureStageExecution        FailureStage = "execution"
-	FailureStageConfig           FailureStage = "config"
-	FailureStageTargetResolution FailureStage = "target-resolution"
-	FailureStageBundleStaging    FailureStage = "bundle-staging"
-	FailureStagePush             FailureStage = "push"
-	FailureStagePoll             FailureStage = "poll"
-	FailureStageOutputDir        FailureStage = "output-dir"
-	FailureStageDownloadOutput   FailureStage = "download-output"
-	FailureStageOutputValidation FailureStage = "output-validation"
-	FailureStageSubmit           FailureStage = "submit"
+	FailureStageExecution               FailureStage = "execution"
+	FailureStageConfig                  FailureStage = "config"
+	FailureStageTargetResolution        FailureStage = "target-resolution"
+	FailureStageGitHubTriggerResolution FailureStage = "github-trigger-resolution"
+	FailureStageBundleStaging           FailureStage = "bundle-staging"
+	FailureStagePush                    FailureStage = "push"
+	FailureStagePoll                    FailureStage = "poll"
+	FailureStageOutputDir               FailureStage = "output-dir"
+	FailureStageDownloadOutput          FailureStage = "download-output"
+	FailureStageOutputValidation        FailureStage = "output-validation"
+	FailureStageSubmit                  FailureStage = "submit"
 )
 
 type Request struct {
