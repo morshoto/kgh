@@ -14,6 +14,7 @@ import (
 	"github.com/shotomorisk/kgh/internal/execution"
 	ghctx "github.com/shotomorisk/kgh/internal/github"
 	"github.com/shotomorisk/kgh/internal/parser"
+	"github.com/shotomorisk/kgh/internal/spec"
 )
 
 var version = "dev"
@@ -141,14 +142,9 @@ func githubCommand(ctx context.Context, args []string, stdout, stderr io.Writer)
 func executeRequest(ctx context.Context, req execution.Request, stdout, stderr io.Writer, writeGitHubReport bool) (int, error) {
 	runner := newRunner(nil)
 	report, execErr := runner.Execute(ctx, req)
-	var failure *execution.FailureSummary
-	if execErr != nil {
-		if partial, ok := execution.ResultFromError(execErr); ok {
-			report = partial
-		} else {
-			return 1, execErr
-		}
-		failure, _ = execution.FailureSummaryFromError(execErr)
+	report, failure, ok := reportOutcome(req, report, execErr)
+	if execErr != nil && !ok {
+		return 1, execErr
 	}
 
 	payload, err := json.MarshalIndent(report, "", "  ")
@@ -168,6 +164,43 @@ func executeRequest(ctx context.Context, req execution.Request, stdout, stderr i
 		return 1, execErr
 	}
 	return 0, nil
+}
+
+func reportOutcome(req execution.Request, report execution.Result, execErr error) (execution.Result, *execution.FailureSummary, bool) {
+	if execErr == nil {
+		return report, nil, true
+	}
+
+	if partial, ok := execution.ResultFromError(execErr); ok {
+		report = partial
+		failure, _ := execution.FailureSummaryFromError(execErr)
+		return report, failure, true
+	}
+
+	return fallbackReport(req), &execution.FailureSummary{
+		Stage: execution.FailureStageExecution,
+		Error: execErr.Error(),
+	}, true
+}
+
+func fallbackReport(req execution.Request) execution.Result {
+	mode := execution.ModeDryRun
+	dryRun := true
+	if !req.DryRun {
+		mode = execution.ModeLive
+		dryRun = false
+	}
+
+	return execution.Result{
+		Mode:         mode,
+		DryRun:       dryRun,
+		ConfigPath:   req.ConfigPath,
+		PollInterval: execution.Duration(req.PollInterval),
+		PollTimeout:  execution.Duration(req.PollTimeout),
+		Execution: spec.ExecutionSpec{
+			TargetName: req.Target,
+		},
+	}
 }
 
 func parseRunFlags(args []string) (runFlags, error) {

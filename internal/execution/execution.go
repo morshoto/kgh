@@ -27,6 +27,7 @@ const (
 type FailureStage string
 
 const (
+	FailureStageExecution        FailureStage = "execution"
 	FailureStageConfig           FailureStage = "config"
 	FailureStageTargetResolution FailureStage = "target-resolution"
 	FailureStageBundleStaging    FailureStage = "bundle-staging"
