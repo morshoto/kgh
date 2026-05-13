@@ -28,6 +28,8 @@ var newRunner = func(adapter execution.Adapter) executionRunner {
 
 type githubExecutionReporter interface {
 	WriteExecutionReport(context.Context, execution.Result) error
+type githubExecutionSummaryWriter interface {
+	WriteExecutionSummary(execution.Result, *execution.FailureSummary) error
 }
 
 var newGitHubReporter = func() githubExecutionReporter {
@@ -140,9 +142,15 @@ func githubCommand(ctx context.Context, args []string, stdout, stderr io.Writer)
 
 func executeRequest(ctx context.Context, req execution.Request, stdout, stderr io.Writer, writeGitHubReport bool) (int, error) {
 	runner := newRunner(nil)
-	report, err := runner.Execute(ctx, req)
-	if err != nil {
-		return 1, err
+	report, execErr := runner.Execute(ctx, req)
+	var failure *execution.FailureSummary
+	if execErr != nil {
+		if partial, ok := execution.ResultFromError(execErr); ok {
+			report = partial
+		} else {
+			return 1, execErr
+		}
+		failure, _ = execution.FailureSummaryFromError(execErr)
 	}
 
 	payload, err := json.MarshalIndent(report, "", "  ")
@@ -153,10 +161,13 @@ func executeRequest(ctx context.Context, req execution.Request, stdout, stderr i
 	if _, err := stdout.Write(append(payload, '\n')); err != nil {
 		return 1, err
 	}
-	if writeGitHubReport {
-		if err := newGitHubReporter().WriteExecutionReport(ctx, report); err != nil {
-			return 1, fmt.Errorf("write GitHub report: %w", err)
+	if writeSummary {
+		if err := newGitHubSummaryWriter().WriteExecutionSummary(report, failure); err != nil {
+			return 1, fmt.Errorf("write GitHub summary: %w", err)
 		}
+	}
+	if execErr != nil {
+		return 1, execErr
 	}
 	return 0, nil
 }
