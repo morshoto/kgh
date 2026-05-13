@@ -27,9 +27,7 @@ var newRunner = func(adapter execution.Adapter) executionRunner {
 }
 
 type githubExecutionReporter interface {
-	WriteExecutionReport(context.Context, execution.Result) error
-type githubExecutionSummaryWriter interface {
-	WriteExecutionSummary(execution.Result, *execution.FailureSummary) error
+	WriteExecutionReport(context.Context, execution.Result, *execution.FailureSummary) error
 }
 
 var newGitHubReporter = func() githubExecutionReporter {
@@ -161,9 +159,9 @@ func executeRequest(ctx context.Context, req execution.Request, stdout, stderr i
 	if _, err := stdout.Write(append(payload, '\n')); err != nil {
 		return 1, err
 	}
-	if writeSummary {
-		if err := newGitHubSummaryWriter().WriteExecutionSummary(report, failure); err != nil {
-			return 1, fmt.Errorf("write GitHub summary: %w", err)
+	if writeGitHubReport {
+		if err := newGitHubReporter().WriteExecutionReport(ctx, report, failure); err != nil {
+			return 1, fmt.Errorf("write GitHub report: %w", err)
 		}
 	}
 	if execErr != nil {

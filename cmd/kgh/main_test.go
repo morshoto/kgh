@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,7 +27,8 @@ func (f fakeExecutionRunner) Execute(context.Context, execution.Request) (execut
 	return f.result, f.err
 }
 
-func (f fakeSummaryWriter) WriteExecutionSummary(execution.Result, *execution.FailureSummary) error {
+func (f *fakeGitHubReporter) WriteExecutionReport(context.Context, execution.Result, *execution.FailureSummary) error {
+	f.calls++
 	return f.err
 }
 
@@ -117,8 +120,10 @@ func TestExecuteRequestGitHubReportFailureIsFatalAfterJSON(t *testing.T) {
 
 func TestExecuteRequestWritesGitHubSummaryOnExecutionFailure(t *testing.T) {
 	originalNewRunner := newRunner
+	originalGitHubReporter := newGitHubReporter
 	t.Cleanup(func() {
 		newRunner = originalNewRunner
+		newGitHubReporter = originalGitHubReporter
 	})
 
 	newRunner = func(execution.Adapter) executionRunner {
@@ -157,6 +162,7 @@ func TestExecuteRequestWritesGitHubSummaryOnExecutionFailure(t *testing.T) {
 	dir := t.TempDir()
 	summaryPath := filepath.Join(dir, "summary.md")
 	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+	t.Setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
