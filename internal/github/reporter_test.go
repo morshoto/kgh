@@ -58,7 +58,7 @@ func TestRunReporterWritesPullRequestComment(t *testing.T) {
 			Competition: "playground-series-s6e2",
 			Submit:      true,
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -87,7 +87,7 @@ func TestRunReporterSkipsCommentOutsidePullRequest(t *testing.T) {
 		CommentWriter: commentWriter,
 	}
 
-	err := reporter.WriteExecutionReport(context.Background(), execution.Result{})
+	err := reporter.WriteExecutionReport(context.Background(), execution.Result{}, nil)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -110,7 +110,7 @@ func TestRunReporterAggregatesErrors(t *testing.T) {
 		CommentWriter: &fakeCommentWriter{},
 	}
 
-	err := reporter.WriteExecutionReport(context.Background(), execution.Result{})
+	err := reporter.WriteExecutionReport(context.Background(), execution.Result{}, nil)
 	if err == nil {
 		t.Fatal("expected an error")
 	}

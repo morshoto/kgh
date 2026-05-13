@@ -18,22 +18,26 @@ type fakeExecutionRunner struct {
 	err    error
 }
 
-type fakeSummaryWriter struct {
-	err error
+type fakeGitHubReporter struct {
+	calls int
+	err   error
 }
 
 func (f fakeExecutionRunner) Execute(context.Context, execution.Request) (execution.Result, error) {
 	return f.result, f.err
 }
 
-func (f fakeSummaryWriter) WriteExecutionSummary(execution.Result, *execution.FailureSummary) error {
+func (f *fakeGitHubReporter) WriteExecutionReport(context.Context, execution.Result, *execution.FailureSummary) error {
+	f.calls++
 	return f.err
 }
 
-func TestExecuteRequestWritesJSONAndGitHubSummary(t *testing.T) {
+func TestExecuteRequestWritesJSONAndGitHubReport(t *testing.T) {
 	originalNewRunner := newRunner
+	originalGitHubReporter := newGitHubReporter
 	t.Cleanup(func() {
 		newRunner = originalNewRunner
+		newGitHubReporter = originalGitHubReporter
 	})
 
 	newRunner = func(execution.Adapter) executionRunner {
@@ -49,11 +53,10 @@ func TestExecuteRequestWritesJSONAndGitHubSummary(t *testing.T) {
 			},
 		}
 	}
-	dir := t.TempDir()
-	summaryPath := filepath.Join(dir, "summary.md")
-	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
-	t.Setenv("GITHUB_EVENT_NAME", "push")
-	t.Setenv("GITHUB_REPOSITORY", "shotomorisk/kgh")
+	reporter := &fakeGitHubReporter{}
+	newGitHubReporter = func() githubExecutionReporter {
+		return reporter
+	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -70,22 +73,17 @@ func TestExecuteRequestWritesJSONAndGitHubSummary(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"target_name": "exp142"`) {
 		t.Fatalf("expected stdout JSON target, got %s", stdout.String())
 	}
-
-	body, err := os.ReadFile(summaryPath)
-	if err != nil {
-		t.Fatalf("read summary file: %v", err)
-	}
-	if !strings.Contains(string(body), "| Target | `exp142` |") {
-		t.Fatalf("unexpected summary body:\n%s", string(body))
+	if reporter.calls != 1 {
+		t.Fatalf("expected 1 GitHub report write, got %d", reporter.calls)
 	}
 }
 
-func TestExecuteRequestSummaryWriteFailureIsFatalAfterJSON(t *testing.T) {
+func TestExecuteRequestGitHubReportFailureIsFatalAfterJSON(t *testing.T) {
 	originalNewRunner := newRunner
-	originalSummaryWriter := newGitHubSummaryWriter
+	originalGitHubReporter := newGitHubReporter
 	t.Cleanup(func() {
 		newRunner = originalNewRunner
-		newGitHubSummaryWriter = originalSummaryWriter
+		newGitHubReporter = originalGitHubReporter
 	})
 
 	newRunner = func(execution.Adapter) executionRunner {
@@ -96,8 +94,8 @@ func TestExecuteRequestSummaryWriteFailureIsFatalAfterJSON(t *testing.T) {
 			},
 		}
 	}
-	newGitHubSummaryWriter = func() githubExecutionSummaryWriter {
-		return fakeSummaryWriter{err: errors.New("disk full")}
+	newGitHubReporter = func() githubExecutionReporter {
+		return &fakeGitHubReporter{err: errors.New("disk full")}
 	}
 
 	var stdout bytes.Buffer
@@ -109,8 +107,8 @@ func TestExecuteRequestSummaryWriteFailureIsFatalAfterJSON(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("expected exit code 1, got %d", code)
 	}
-	if !strings.Contains(err.Error(), "write GitHub summary: disk full") {
-		t.Fatalf("expected wrapped summary error, got %q", err.Error())
+	if !strings.Contains(err.Error(), "write GitHub report: disk full") {
+		t.Fatalf("expected wrapped report error, got %q", err.Error())
 	}
 	if stdout.Len() == 0 {
 		t.Fatal("expected stdout JSON to still be written")
@@ -122,8 +120,10 @@ func TestExecuteRequestSummaryWriteFailureIsFatalAfterJSON(t *testing.T) {
 
 func TestExecuteRequestWritesGitHubSummaryOnExecutionFailure(t *testing.T) {
 	originalNewRunner := newRunner
+	originalGitHubReporter := newGitHubReporter
 	t.Cleanup(func() {
 		newRunner = originalNewRunner
+		newGitHubReporter = originalGitHubReporter
 	})
 
 	newRunner = func(execution.Adapter) executionRunner {
@@ -162,6 +162,7 @@ func TestExecuteRequestWritesGitHubSummaryOnExecutionFailure(t *testing.T) {
 	dir := t.TempDir()
 	summaryPath := filepath.Join(dir, "summary.md")
 	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+	t.Setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -205,10 +206,10 @@ func TestExecuteRequestWritesGitHubSummaryOnExecutionFailure(t *testing.T) {
 
 func TestExecuteRequestSkipsSummaryWhenDisabled(t *testing.T) {
 	originalNewRunner := newRunner
-	originalSummaryWriter := newGitHubSummaryWriter
+	originalGitHubReporter := newGitHubReporter
 	t.Cleanup(func() {
 		newRunner = originalNewRunner
-		newGitHubSummaryWriter = originalSummaryWriter
+		newGitHubReporter = originalGitHubReporter
 	})
 
 	newRunner = func(execution.Adapter) executionRunner {
@@ -219,13 +220,9 @@ func TestExecuteRequestSkipsSummaryWhenDisabled(t *testing.T) {
 			},
 		}
 	}
-	newGitHubSummaryWriter = func() githubExecutionSummaryWriter {
-		return fakeSummaryWriter{err: errors.New("should not be called")}
+	newGitHubReporter = func() githubExecutionReporter {
+		return &fakeGitHubReporter{err: errors.New("should not be called")}
 	}
-
-	dir := t.TempDir()
-	summaryPath := filepath.Join(dir, "summary.md")
-	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -236,15 +233,14 @@ func TestExecuteRequestSkipsSummaryWhenDisabled(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d", code)
 	}
-	if _, err := os.Stat(summaryPath); !os.IsNotExist(err) {
-		t.Fatalf("expected no summary file, stat err=%v", err)
-	}
 }
 
 func TestExecuteRequestIgnoresMissingGitHubStepSummaryEnv(t *testing.T) {
 	originalNewRunner := newRunner
+	originalGitHubReporter := newGitHubReporter
 	t.Cleanup(func() {
 		newRunner = originalNewRunner
+		newGitHubReporter = originalGitHubReporter
 	})
 
 	newRunner = func(execution.Adapter) executionRunner {
@@ -256,7 +252,10 @@ func TestExecuteRequestIgnoresMissingGitHubStepSummaryEnv(t *testing.T) {
 		}
 	}
 
-	t.Setenv("GITHUB_STEP_SUMMARY", "")
+	reporter := &fakeGitHubReporter{}
+	newGitHubReporter = func() githubExecutionReporter {
+		return reporter
+	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -269,6 +268,9 @@ func TestExecuteRequestIgnoresMissingGitHubStepSummaryEnv(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"target_name": "exp142"`) {
 		t.Fatalf("expected stdout JSON target, got %s", stdout.String())
+	}
+	if reporter.calls != 1 {
+		t.Fatalf("expected 1 GitHub report write, got %d", reporter.calls)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected empty stderr, got %q", stderr.String())

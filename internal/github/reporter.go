@@ -32,10 +32,10 @@ func NewRunReporter() RunReporter {
 	}
 }
 
-func (r RunReporter) WriteExecutionReport(ctx context.Context, result execution.Result) error {
+func (r RunReporter) WriteExecutionReport(ctx context.Context, result execution.Result, failure *execution.FailureSummary) error {
 	var errs []error
 
-	if err := r.SummaryWriter.WriteExecutionSummary(result, nil); err != nil {
+	if err := r.SummaryWriter.WriteExecutionSummary(result, failure); err != nil {
 		errs = append(errs, fmt.Errorf("write GitHub summary: %w", err))
 	}
 
