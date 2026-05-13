@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/shotomorisk/kgh/internal/execution"
+	ghctx "github.com/shotomorisk/kgh/internal/github"
 	"github.com/shotomorisk/kgh/internal/spec"
 )
 
@@ -198,6 +199,75 @@ func TestExecuteRequestWritesGitHubSummaryOnExecutionFailure(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "- Kernel ID: `yourname/exp142`") {
 		t.Fatalf("unexpected summary body:\n%s", string(body))
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected executeRequest not to write stderr directly, got %q", stderr.String())
+	}
+}
+
+func TestExecuteRequestWritesGitHubSummaryOnExecutionFailureWithoutPartialResult(t *testing.T) {
+	originalNewRunner := newRunner
+	originalGitHubReporter := newGitHubReporter
+	t.Cleanup(func() {
+		newRunner = originalNewRunner
+		newGitHubReporter = originalGitHubReporter
+	})
+
+	newRunner = func(execution.Adapter) executionRunner {
+		return fakeExecutionRunner{
+			err: errors.New("bootstrap failed"),
+		}
+	}
+	newGitHubReporter = func() githubExecutionReporter {
+		return ghctx.NewRunReporter()
+	}
+
+	dir := t.TempDir()
+	summaryPath := filepath.Join(dir, "summary.md")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+	t.Setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code, err := executeRequest(context.Background(), execution.Request{
+		Target:     "exp142",
+		DryRun:     false,
+		ConfigPath: ".kgh/config.yaml",
+	}, &stdout, &stderr, true)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if !strings.Contains(err.Error(), "bootstrap failed") {
+		t.Fatalf("expected wrapped execution error, got %q", err.Error())
+	}
+	if !strings.Contains(stdout.String(), `"target_name": "exp142"`) {
+		t.Fatalf("expected stdout JSON target, got %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"mode": "live"`) {
+		t.Fatalf("expected stdout JSON mode, got %s", stdout.String())
+	}
+
+	body, readErr := os.ReadFile(summaryPath)
+	if readErr != nil {
+		t.Fatalf("read summary file: %v", readErr)
+	}
+	if !strings.Contains(string(body), "### Failure") {
+		t.Fatalf("unexpected summary body:\n%s", string(body))
+	}
+	if !strings.Contains(string(body), "- Stage: `execution`") {
+		t.Fatalf("unexpected summary body:\n%s", string(body))
+	}
+	if !strings.Contains(string(body), "- Error: bootstrap failed") {
+		t.Fatalf("unexpected summary body:\n%s", string(body))
+	}
+	if !strings.Contains(string(body), "- Target: `exp142`") {
+		t.Fatalf("unexpected summary body:\n%s", string(body))
+	}
+	if strings.Contains(string(body), "Kernel ID:") {
+		t.Fatalf("expected no kernel id for fallback summary, got:\n%s", string(body))
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected executeRequest not to write stderr directly, got %q", stderr.String())
