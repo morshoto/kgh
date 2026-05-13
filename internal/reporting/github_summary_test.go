@@ -178,6 +178,33 @@ func TestRenderGitHubSummaryLiveFailurePartialResult(t *testing.T) {
 	assertNotContains(t, got, "| Field | Value |")
 }
 
+func TestRenderGitHubSummaryEarlyFailurePartialResult(t *testing.T) {
+	t.Parallel()
+
+	got := RenderGitHubSummary(execution.Result{
+		Mode: execution.ModeLive,
+		Execution: spec.ExecutionSpec{
+			TargetName:  "exp142",
+			Notebook:    "notebooks/exp142.ipynb",
+			KernelID:    "yourname/exp142",
+			Competition: "playground-series-s6e2",
+			Submit:      true,
+		},
+	}, GitHubSummaryOptions{
+		Failure: &execution.FailureSummary{
+			Stage: execution.FailureStageBundleStaging,
+			Error: "stage kaggle bundle: prepare kaggle bundle: check notebook notebooks/exp142.ipynb: notebook file is missing",
+		},
+	})
+
+	assertContains(t, got, "### Failure")
+	assertContains(t, got, "- Stage: `bundle-staging`")
+	assertContains(t, got, "- Target: `exp142`")
+	assertContains(t, got, "- Kernel ID: `yourname/exp142`")
+	assertContains(t, got, "- References: competition: `playground-series-s6e2`")
+	assertNotContains(t, got, "unavailable")
+}
+
 func TestRenderGitHubSummarySubmissionDisabled(t *testing.T) {
 	t.Parallel()
 

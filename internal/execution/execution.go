@@ -27,6 +27,9 @@ const (
 type FailureStage string
 
 const (
+	FailureStageConfig           FailureStage = "config"
+	FailureStageTargetResolution FailureStage = "target-resolution"
+	FailureStageBundleStaging    FailureStage = "bundle-staging"
 	FailureStagePush             FailureStage = "push"
 	FailureStagePoll             FailureStage = "poll"
 	FailureStageOutputDir        FailureStage = "output-dir"
@@ -248,9 +251,11 @@ func (r *Runner) Execute(ctx context.Context, req Request) (Result, error) {
 		req.ConfigPath = DefaultConfigPath
 	}
 
+	report := baseResultFromRequest(req, r.pollInterval, r.pollTimeout)
+
 	cfg, err := r.loadConfig(req.ConfigPath)
 	if err != nil {
-		return Result{}, fmt.Errorf("load config %q: %w", req.ConfigPath, err)
+		return report, wrapErrorWithResult(report, FailureStageConfig, err, "load config %q: %w", req.ConfigPath)
 	}
 
 	trigger := parser.Trigger{
@@ -261,22 +266,28 @@ func (r *Runner) Execute(ctx context.Context, req Request) (Result, error) {
 
 	execSpec, err := planner.Resolve(cfg, trigger)
 	if err != nil {
-		return Result{}, err
+		return report, wrapErrorWithResult(report, FailureStageTargetResolution, err, "%w")
 	}
 
-	report := Result{
-		Mode:         ModeDryRun,
-		DryRun:       true,
-		ConfigPath:   req.ConfigPath,
-		PollInterval: Duration(effectivePollInterval(req.PollInterval, r.pollInterval)),
-		PollTimeout:  Duration(effectivePollTimeout(req.PollTimeout, r.pollTimeout)),
-		Execution:    execSpec,
-	}
+	report.Execution = execSpec
 	if !req.DryRun {
 		return r.executeLive(ctx, execSpec, report)
 	}
 
 	return report, nil
+}
+
+func baseResultFromRequest(req Request, defaultPollInterval, defaultPollTimeout time.Duration) Result {
+	return Result{
+		Mode:         ModeDryRun,
+		DryRun:       true,
+		ConfigPath:   req.ConfigPath,
+		PollInterval: Duration(effectivePollInterval(req.PollInterval, defaultPollInterval)),
+		PollTimeout:  Duration(effectivePollTimeout(req.PollTimeout, defaultPollTimeout)),
+		Execution: spec.ExecutionSpec{
+			TargetName: req.Target,
+		},
+	}
 }
 
 func wrapErrorWithResult(report Result, stage FailureStage, err error, format string, args ...any) error {
@@ -296,9 +307,12 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		return Result{}, fmt.Errorf("live execution requires a Kaggle adapter")
 	}
 
+	report.Mode = ModeLive
+	report.DryRun = false
+
 	bundle, err := kaggle.StageKernelBundle(execSpec)
 	if err != nil {
-		return Result{}, fmt.Errorf("stage kaggle bundle: %w", err)
+		return report, wrapErrorWithResult(report, FailureStageBundleStaging, err, "stage kaggle bundle: %w")
 	}
 	defer func() {
 		if bundle.Cleanup != nil {
@@ -306,8 +320,6 @@ func (r *Runner) executeLive(ctx context.Context, execSpec spec.ExecutionSpec, r
 		}
 	}()
 
-	report.Mode = ModeLive
-	report.DryRun = false
 	report.Bundle = &BundleResult{
 		WorkDir:      bundle.WorkDir,
 		NotebookPath: bundle.NotebookPath,
