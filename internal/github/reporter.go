@@ -35,7 +35,7 @@ func NewRunReporter() RunReporter {
 func (r RunReporter) WriteExecutionReport(ctx context.Context, result execution.Result) error {
 	var errs []error
 
-	if err := r.SummaryWriter.WriteExecutionSummary(result); err != nil {
+	if err := r.SummaryWriter.WriteExecutionSummary(result, nil); err != nil {
 		errs = append(errs, fmt.Errorf("write GitHub summary: %w", err))
 	}
 

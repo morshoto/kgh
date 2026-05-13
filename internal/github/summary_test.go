@@ -23,7 +23,7 @@ func TestSummaryWriterNoopWithoutEnv(t *testing.T) {
 		},
 	}
 
-	if err := writer.WriteExecutionSummary(execution.Result{}); err != nil {
+	if err := writer.WriteExecutionSummary(execution.Result{}, nil); err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	if called {
@@ -59,7 +59,7 @@ func TestSummaryWriterAppendsRenderedMarkdown(t *testing.T) {
 		Execution: spec.ExecutionSpec{
 			TargetName: "exp142",
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -86,7 +86,7 @@ func TestSummaryWriterReturnsAppendError(t *testing.T) {
 		AppendFile: func(string, []byte) error { return wantErr },
 	}
 
-	err := writer.WriteExecutionSummary(execution.Result{})
+	err := writer.WriteExecutionSummary(execution.Result{}, nil)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected append error, got %v", err)
 	}

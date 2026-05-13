@@ -25,7 +25,7 @@ func TestRenderGitHubSummaryDryRun(t *testing.T) {
 			Competition: "playground-series-s6e2",
 			Submit:      true,
 		},
-	})
+	}, GitHubSummaryOptions{})
 
 	assertContains(t, got, "## kgh run summary")
 	assertContains(t, got, "| Target | `exp142` |")
@@ -72,7 +72,7 @@ func TestRenderGitHubSummaryLiveSuccess(t *testing.T) {
 		Outputs: &execution.OutputsResult{
 			Submission: execution.OutputFileResult{Path: "/tmp/output/submission.csv"},
 		},
-	})
+	}, GitHubSummaryOptions{})
 
 	assertContains(t, got, "| Notebook Path | `/tmp/bundle/notebooks/exp142.ipynb` |")
 	assertContains(t, got, "| Run Status | succeeded |")
@@ -138,11 +138,44 @@ func TestRenderGitHubSummaryPendingScore(t *testing.T) {
 		Score: &execution.ScoreResult{
 			State: execution.ScoreStatePending,
 		},
-	})
+	}, GitHubSummaryOptions{})
 
 	assertContains(t, got, "| Run Status | running |")
 	assertContains(t, got, "| Submit Status | submission metadata unavailable |")
 	assertContains(t, got, "| Public Score | pending |")
+}
+
+func TestRenderGitHubSummaryLiveFailurePartialResult(t *testing.T) {
+	t.Parallel()
+
+	got := RenderGitHubSummary(execution.Result{
+		Mode: execution.ModeLive,
+		Execution: spec.ExecutionSpec{
+			TargetName:  "exp142",
+			Notebook:    "notebooks/exp142.ipynb",
+			KernelID:    "yourname/exp142",
+			KernelRef:   "yourname/exp142",
+			Competition: "playground-series-s6e2",
+			Submit:      true,
+		},
+		Push: &execution.PushResult{
+			KernelRef: "yourname/exp142",
+		},
+	}, GitHubSummaryOptions{
+		Failure: &execution.FailureSummary{
+			Stage: execution.FailureStageSubmit,
+			Error: "submit kaggle competition:\nsubmit failed",
+		},
+	})
+
+	assertContains(t, got, "## kgh run summary")
+	assertContains(t, got, "### Failure")
+	assertContains(t, got, "- Stage: `submit`")
+	assertContains(t, got, "- Error: submit kaggle competition: submit failed")
+	assertContains(t, got, "- Target: `exp142`")
+	assertContains(t, got, "- Kernel ID: `yourname/exp142`")
+	assertContains(t, got, "- References: kernel: `yourname/exp142`<br>competition: `playground-series-s6e2`")
+	assertNotContains(t, got, "| Field | Value |")
 }
 
 func TestRenderGitHubSummarySubmissionDisabled(t *testing.T) {
@@ -153,7 +186,7 @@ func TestRenderGitHubSummarySubmissionDisabled(t *testing.T) {
 			TargetName: "exp142",
 			Submit:     false,
 		},
-	})
+	}, GitHubSummaryOptions{})
 
 	assertContains(t, got, "| Submit Status | disabled |")
 	assertContains(t, got, "| Public Score | unavailable |")
@@ -168,7 +201,7 @@ func TestRenderGitHubSummaryPartialResultFallbacks(t *testing.T) {
 			Submit:     true,
 		},
 		Push: &execution.PushResult{},
-	})
+	}, GitHubSummaryOptions{})
 
 	assertContains(t, got, "| Notebook Path | unavailable |")
 	assertContains(t, got, "| Kernel ID | unavailable |")
@@ -176,9 +209,36 @@ func TestRenderGitHubSummaryPartialResultFallbacks(t *testing.T) {
 	assertContains(t, got, "| References | unavailable |")
 }
 
+func TestRenderGitHubSummaryFailureOmitsUnavailableOptionalFields(t *testing.T) {
+	t.Parallel()
+
+	got := RenderGitHubSummary(execution.Result{
+		Mode: execution.ModeLive,
+	}, GitHubSummaryOptions{
+		Failure: &execution.FailureSummary{
+			Stage: execution.FailureStagePush,
+			Error: "push kaggle kernel: auth failed",
+		},
+	})
+
+	assertContains(t, got, "- Stage: `push`")
+	assertContains(t, got, "- Error: push kaggle kernel: auth failed")
+	assertNotContains(t, got, "Target:")
+	assertNotContains(t, got, "Kernel ID:")
+	assertNotContains(t, got, "References:")
+	assertNotContains(t, got, "unavailable")
+}
+
 func assertContains(t *testing.T, got, want string) {
 	t.Helper()
 	if !strings.Contains(got, want) {
 		t.Fatalf("expected output to contain %q, got:\n%s", want, got)
+	}
+}
+
+func assertNotContains(t *testing.T, got, want string) {
+	t.Helper()
+	if strings.Contains(got, want) {
+		t.Fatalf("expected output not to contain %q, got:\n%s", want, got)
 	}
 }

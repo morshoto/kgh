@@ -17,8 +17,16 @@ const (
 	stateSubmissionMetadataUnavailable = "submission metadata unavailable"
 )
 
+type GitHubSummaryOptions struct {
+	Failure *execution.FailureSummary
+}
+
 // RenderGitHubSummary renders an execution result into Markdown for GitHub step summaries.
-func RenderGitHubSummary(result execution.Result) string {
+func RenderGitHubSummary(result execution.Result, opts GitHubSummaryOptions) string {
+	if opts.Failure != nil {
+		return renderGitHubFailureSummary(result, *opts.Failure)
+	}
+
 	rows := []summaryRow{
 		{Field: "Target", Value: formatIdentifier(valueOr(result.Execution.TargetName, stateUnavailable))},
 		{Field: "Notebook Path", Value: formatIdentifier(resolveNotebookPath(result))},
@@ -35,6 +43,31 @@ func RenderGitHubSummary(result execution.Result) string {
 	b.WriteString("| --- | --- |\n")
 	for _, row := range rows {
 		fmt.Fprintf(&b, "| %s | %s |\n", escapeMarkdown(row.Field), row.Value)
+	}
+	return b.String()
+}
+
+func renderGitHubFailureSummary(result execution.Result, failure execution.FailureSummary) string {
+	rows := make([]summaryRow, 0, 5)
+	rows = append(rows,
+		summaryRow{Field: "Stage", Value: formatIdentifier(string(failure.Stage))},
+		summaryRow{Field: "Error", Value: escapeMarkdown(normalizeInlineText(failure.Error))},
+	)
+	if target := strings.TrimSpace(result.Execution.TargetName); target != "" {
+		rows = append(rows, summaryRow{Field: "Target", Value: formatIdentifier(target)})
+	}
+	if kernelID := strings.TrimSpace(resolveKernelID(result)); kernelID != "" && kernelID != stateUnavailable {
+		rows = append(rows, summaryRow{Field: "Kernel ID", Value: formatIdentifier(kernelID)})
+	}
+	if refs := formatReferences(result); refs != stateUnavailable {
+		rows = append(rows, summaryRow{Field: "References", Value: refs})
+	}
+
+	var b strings.Builder
+	b.WriteString("## kgh run summary\n")
+	b.WriteString("### Failure\n")
+	for _, row := range rows {
+		fmt.Fprintf(&b, "- %s: %s\n", escapeMarkdown(row.Field), row.Value)
 	}
 	return b.String()
 }
@@ -166,6 +199,10 @@ func normalizeStatus(value string) string {
 		return ""
 	}
 	return value
+}
+
+func normalizeInlineText(value string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 }
 
 func valueOr(value, fallback string) string {
