@@ -125,6 +125,23 @@ targets:
 	if err == nil {
 		t.Fatal("expected an error")
 	}
+	var reportErr *ErrorWithResult
+	if !errors.As(err, &reportErr) {
+		t.Fatalf("expected error with partial result, got %T", err)
+	}
+	if reportErr.Stage != FailureStageTargetResolution {
+		t.Fatalf("expected target resolution stage, got %q", reportErr.Stage)
+	}
+	if reportErr.Result.Execution.TargetName != "missing" {
+		t.Fatalf("expected requested target in partial result, got %+v", reportErr.Result.Execution)
+	}
+	failure, ok := FailureSummaryFromError(err)
+	if !ok {
+		t.Fatalf("expected failure summary for target resolution error")
+	}
+	if failure.Stage != FailureStageTargetResolution {
+		t.Fatalf("expected failure summary stage %q, got %q", FailureStageTargetResolution, failure.Stage)
+	}
 	if got := err.Error(); !strings.Contains(got, `unknown target "missing"`) {
 		t.Fatalf("unexpected error %q", got)
 	}
@@ -133,15 +150,104 @@ targets:
 func TestRunnerExecuteConfigLoadFailure(t *testing.T) {
 	t.Parallel()
 
+	configPath := filepath.Join(t.TempDir(), "missing.yaml")
 	_, err := NewRunner(nil).Execute(context.Background(), Request{
 		Target:     "exp142",
 		DryRun:     true,
-		ConfigPath: filepath.Join(t.TempDir(), "missing.yaml"),
+		ConfigPath: configPath,
 	})
 	if err == nil {
 		t.Fatal("expected an error")
 	}
+	var reportErr *ErrorWithResult
+	if !errors.As(err, &reportErr) {
+		t.Fatalf("expected error with partial result, got %T", err)
+	}
+	if reportErr.Stage != FailureStageConfig {
+		t.Fatalf("expected config stage, got %q", reportErr.Stage)
+	}
+	if reportErr.Result.ConfigPath != configPath {
+		t.Fatalf("expected config path in partial result, got %+v", reportErr.Result)
+	}
+	if reportErr.Result.Execution.TargetName != "exp142" {
+		t.Fatalf("expected target name in partial result, got %+v", reportErr.Result.Execution)
+	}
+	if reportErr.Result.Mode != ModeDryRun || !reportErr.Result.DryRun {
+		t.Fatalf("expected dry-run partial result, got %+v", reportErr.Result)
+	}
+	failure, ok := FailureSummaryFromError(err)
+	if !ok {
+		t.Fatalf("expected failure summary for config error")
+	}
+	if failure.Stage != FailureStageConfig {
+		t.Fatalf("expected failure summary stage %q, got %q", FailureStageConfig, failure.Stage)
+	}
 	if got := err.Error(); !strings.Contains(got, "load config") {
+		t.Fatalf("unexpected error %q", got)
+	}
+}
+
+func TestRunnerExecuteLiveBundleStagingFailureReturnsErrorWithPartialResult(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	missingNotebook := filepath.Join(dir, "notebooks", "missing.ipynb")
+
+	configPath := filepath.Join(dir, ".kgh", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`
+targets:
+  exp142:
+    notebook: `+missingNotebook+`
+    kernel_id: yourname/exp142
+    competition: playground-series-s6e2
+    submit: true
+    resources:
+      private: true
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := NewRunner(&liveAdapter{t: t}).Execute(context.Background(), Request{
+		Target:     "exp142",
+		DryRun:     false,
+		ConfigPath: configPath,
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	var reportErr *ErrorWithResult
+	if !errors.As(err, &reportErr) {
+		t.Fatalf("expected error with partial result, got %T", err)
+	}
+	if reportErr.Stage != FailureStageBundleStaging {
+		t.Fatalf("expected bundle staging stage, got %q", reportErr.Stage)
+	}
+	if reportErr.Result.Mode != ModeLive || reportErr.Result.DryRun {
+		t.Fatalf("expected live partial result, got %+v", reportErr.Result)
+	}
+	if reportErr.Result.Execution.TargetName != "exp142" {
+		t.Fatalf("expected target details in partial result, got %+v", reportErr.Result.Execution)
+	}
+	if reportErr.Result.Execution.KernelID != "yourname/exp142" {
+		t.Fatalf("expected resolved kernel id in partial result, got %+v", reportErr.Result.Execution)
+	}
+	if reportErr.Result.Execution.Competition != "playground-series-s6e2" {
+		t.Fatalf("expected resolved competition in partial result, got %+v", reportErr.Result.Execution)
+	}
+	if reportErr.Result.Bundle != nil {
+		t.Fatalf("expected no bundle details before successful staging, got %+v", reportErr.Result.Bundle)
+	}
+	failure, ok := FailureSummaryFromError(err)
+	if !ok {
+		t.Fatalf("expected failure summary for bundle staging error")
+	}
+	if failure.Stage != FailureStageBundleStaging {
+		t.Fatalf("expected failure summary stage %q, got %q", FailureStageBundleStaging, failure.Stage)
+	}
+	if got := err.Error(); !strings.Contains(got, "stage kaggle bundle") {
 		t.Fatalf("unexpected error %q", got)
 	}
 }
