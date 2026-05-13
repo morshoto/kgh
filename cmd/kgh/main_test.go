@@ -11,12 +11,18 @@ import (
 
 	"github.com/shotomorisk/kgh/internal/execution"
 	ghctx "github.com/shotomorisk/kgh/internal/github"
+	"github.com/shotomorisk/kgh/internal/parser"
 	"github.com/shotomorisk/kgh/internal/spec"
 )
 
 type fakeExecutionRunner struct {
 	result execution.Result
 	err    error
+}
+
+type fakeTriggerResolver struct {
+	trigger parser.Trigger
+	err     error
 }
 
 type fakeGitHubReporter struct {
@@ -26,6 +32,10 @@ type fakeGitHubReporter struct {
 
 func (f fakeExecutionRunner) Execute(context.Context, execution.Request) (execution.Result, error) {
 	return f.result, f.err
+}
+
+func (f fakeTriggerResolver) Resolve(context.Context) (parser.Trigger, error) {
+	return f.trigger, f.err
 }
 
 func (f *fakeGitHubReporter) WriteExecutionReport(context.Context, execution.Result, *execution.FailureSummary) error {
@@ -344,5 +354,59 @@ func TestExecuteRequestIgnoresMissingGitHubStepSummaryEnv(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+}
+
+func TestRunWithIOWritesGitHubSummaryOnTriggerResolutionFailure(t *testing.T) {
+	originalTriggerResolver := newTriggerResolver
+	originalGitHubReporter := newGitHubReporter
+	t.Cleanup(func() {
+		newTriggerResolver = originalTriggerResolver
+		newGitHubReporter = originalGitHubReporter
+	})
+
+	newTriggerResolver = func() githubTriggerResolver {
+		return fakeTriggerResolver{
+			err: errors.New("parse commit message for abc123: no submit trigger found"),
+		}
+	}
+	newGitHubReporter = func() githubExecutionReporter {
+		t.Fatal("expected execution reporter to be skipped on trigger resolution failure")
+		return nil
+	}
+
+	dir := t.TempDir()
+	summaryPath := filepath.Join(dir, "summary.md")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runWithIO([]string{"github", "run", "--dry-run=false"}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "parse commit message for abc123: no submit trigger found") {
+		t.Fatalf("unexpected stderr %q", stderr.String())
+	}
+
+	body, err := os.ReadFile(summaryPath)
+	if err != nil {
+		t.Fatalf("read summary file: %v", err)
+	}
+	if !strings.Contains(string(body), "### Failure") {
+		t.Fatalf("unexpected summary body:\n%s", string(body))
+	}
+	if !strings.Contains(string(body), "- Stage: `github-trigger-resolution`") {
+		t.Fatalf("unexpected summary body:\n%s", string(body))
+	}
+	if !strings.Contains(string(body), "- Error: parse commit message for abc123: no submit trigger found") {
+		t.Fatalf("unexpected summary body:\n%s", string(body))
+	}
+	if strings.Contains(string(body), "Target:") {
+		t.Fatalf("expected no target in summary, got:\n%s", string(body))
 	}
 }
