@@ -256,6 +256,26 @@ func TestRenderGitHubSummaryFailureOmitsUnavailableOptionalFields(t *testing.T) 
 	assertNotContains(t, got, "unavailable")
 }
 
+func TestRenderGitHubSummaryGitHubTriggerResolutionFailure(t *testing.T) {
+	t.Parallel()
+
+	got := RenderGitHubSummary(execution.Result{
+		Mode: execution.ModeLive,
+	}, GitHubSummaryOptions{
+		Failure: &execution.FailureSummary{
+			Stage: execution.FailureStageGitHubTriggerResolution,
+			Error: "parse commit message for abc123: no submit trigger found",
+		},
+	})
+
+	assertContains(t, got, "### Failure")
+	assertContains(t, got, "- Stage: `github-trigger-resolution`")
+	assertContains(t, got, "- Error: parse commit message for abc123: no submit trigger found")
+	assertNotContains(t, got, "Target:")
+	assertNotContains(t, got, "Kernel ID:")
+	assertNotContains(t, got, "References:")
+}
+
 func assertContains(t *testing.T, got, want string) {
 	t.Helper()
 	if !strings.Contains(got, want) {

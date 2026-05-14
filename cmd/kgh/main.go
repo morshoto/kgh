@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -31,8 +32,24 @@ type githubExecutionReporter interface {
 	WriteExecutionReport(context.Context, execution.Result, *execution.FailureSummary) error
 }
 
+type githubTriggerResolver interface {
+	Resolve(context.Context) (parser.Trigger, error)
+}
+
+type githubSummaryWriter interface {
+	WriteExecutionSummary(execution.Result, *execution.FailureSummary) error
+}
+
 var newGitHubReporter = func() githubExecutionReporter {
 	return ghctx.NewRunReporter()
+}
+
+var newTriggerResolver = func() githubTriggerResolver {
+	return ghctx.NewTriggerResolver()
+}
+
+var newGitHubSummaryWriter = func() githubSummaryWriter {
+	return ghctx.NewSummaryWriter()
 }
 
 func main() {
@@ -131,8 +148,11 @@ func githubCommand(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return 1, err
 	}
 
-	trigger, err := ghctx.NewTriggerResolver().Resolve(ctx)
+	trigger, err := newTriggerResolver().Resolve(ctx)
 	if err != nil {
+		if summaryErr := writeGitHubTriggerFailureSummary(flags.sharedRunFlags, err); summaryErr != nil {
+			return 1, errors.Join(err, summaryErr)
+		}
 		return 1, err
 	}
 
@@ -201,6 +221,23 @@ func fallbackReport(req execution.Request) execution.Result {
 			TargetName: req.Target,
 		},
 	}
+}
+
+func writeGitHubTriggerFailureSummary(flags sharedRunFlags, triggerErr error) error {
+	report := fallbackReport(execution.Request{
+		DryRun:       flags.dryRun,
+		ConfigPath:   execution.DefaultConfigPath,
+		PollInterval: flags.pollInterval,
+		PollTimeout:  flags.timeout,
+	})
+	failure := &execution.FailureSummary{
+		Stage: execution.FailureStageGitHubTriggerResolution,
+		Error: triggerErr.Error(),
+	}
+	if err := newGitHubSummaryWriter().WriteExecutionSummary(report, failure); err != nil {
+		return fmt.Errorf("write GitHub summary: %w", err)
+	}
+	return nil
 }
 
 func parseRunFlags(args []string) (runFlags, error) {
