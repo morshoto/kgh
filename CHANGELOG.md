@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.0.10](https://github.com/morshoto/kgh/compare/v0.0.9...v0.0.10) - 2026-05-14
+- cmd: emit GitHub summaries for github run by @morshoto in https://github.com/morshoto/kgh/pull/98
+- execution: degrade gracefully on score lookup failures by @morshoto in https://github.com/morshoto/kgh/pull/99
+- Add Github run reporting and PR comment upsert by @morshoto in https://github.com/morshoto/kgh/pull/101
+- Wire summary writing into the GitHub CLI path by @morshoto in https://github.com/morshoto/kgh/pull/102
+- No longer writes the redundant “live mode” block to by @morshoto in https://github.com/morshoto/kgh/pull/103
+- Github summary failure by @morshoto in https://github.com/morshoto/kgh/pull/108
+- Github summary upsert comments by @morshoto in https://github.com/morshoto/kgh/pull/107
+- Early failures now return structured ErrorWithResult data by @morshoto in https://github.com/morshoto/kgh/pull/113
+- add: executeRequest in cmd/kgh/main.go no longer returns immediately … by @morshoto in https://github.com/morshoto/kgh/pull/114
+- Github action summary when resolution failed by @morshoto in https://github.com/morshoto/kgh/pull/135
+
 ## [v0.0.9](https://github.com/morshoto/kgh/compare/v0.0.8...v0.0.9) - 2026-05-03
 - build(deps): bump actions/checkout from 4 to 6 by @dependabot[bot] in https://github.com/morshoto/kgh/pull/83
 - Integrate kaggle PB retrieval into live execution  by @morshoto in https://github.com/morshoto/kgh/pull/87
