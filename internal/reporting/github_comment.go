@@ -25,6 +25,10 @@ type GitHubCommentOptions struct {
 // RenderGitHubPRComment renders a stable Markdown PR comment for a run result.
 func RenderGitHubPRComment(result execution.Result, opts GitHubCommentOptions) string {
 	var b strings.Builder
+	comparison := opts.Comparison
+	if comparison == nil {
+		comparison = &GitHubCommentComparison{}
+	}
 
 	b.WriteString("<!-- kgh:run-report -->\n")
 	b.WriteString("## kgh run report\n")
@@ -49,15 +53,13 @@ func RenderGitHubPRComment(result execution.Result, opts GitHubCommentOptions) s
 	writeCommentRow(&b, "Submission Output", formatIdentifier(valueOr(result.Execution.Outputs.Submission, stateUnavailable)))
 	writeCommentRow(&b, "Metrics Output", formatIdentifier(valueOr(result.Execution.Outputs.Metrics, stateUnavailable)))
 
-	if opts.Comparison != nil {
-		b.WriteString("\n### Comparison\n")
-		b.WriteString("| Field | Value |\n")
-		b.WriteString("| --- | --- |\n")
-		writeCommentRow(&b, "Baseline", formatIdentifier(valueOr(opts.Comparison.Label, stateUnavailable)))
-		writeCommentRow(&b, "Baseline Score", valueOr(strings.TrimSpace(opts.Comparison.BaselineScore), stateUnavailable))
-		writeCommentRow(&b, "Current Score", valueOr(strings.TrimSpace(opts.Comparison.CurrentScore), stateUnavailable))
-		writeCommentRow(&b, "Delta", valueOr(strings.TrimSpace(opts.Comparison.Delta), stateUnavailable))
-	}
+	b.WriteString("\n### Comparison\n")
+	b.WriteString("| Field | Value |\n")
+	b.WriteString("| --- | --- |\n")
+	writeCommentRow(&b, "Baseline", formatIdentifier(valueOr(comparison.Label, stateUnavailable)))
+	writeCommentRow(&b, "Baseline Score", valueOr(strings.TrimSpace(comparison.BaselineScore), stateUnavailable))
+	writeCommentRow(&b, "Current Score", valueOr(strings.TrimSpace(comparison.CurrentScore), stateUnavailable))
+	writeCommentRow(&b, "Delta", valueOr(strings.TrimSpace(comparison.Delta), stateUnavailable))
 
 	return b.String()
 }
