@@ -64,7 +64,7 @@ func (w PRCommentWriter) findExistingCommentID(ctx context.Context, reportCtx Re
 	for page := 1; ; page++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, w.apiURL()+"/repos/"+reportCtx.RepositoryOwner+"/"+reportCtx.RepositoryName+"/issues/"+fmt.Sprintf("%d", reportCtx.PullRequestNumber)+"/comments?per_page="+fmt.Sprintf("%d", commentsPageSize)+"&page="+fmt.Sprintf("%d", page), nil)
 		if err != nil {
-			return 0, err
+			return 0, wrapCommentOperationError("list GitHub PR comments", err)
 		}
 		req.Header.Set("Accept", "application/vnd.github+json")
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -75,7 +75,7 @@ func (w PRCommentWriter) findExistingCommentID(ctx context.Context, reportCtx Re
 			Body string `json:"body"`
 		}
 		if err := w.doJSON(req, &comments); err != nil {
-			return 0, err
+			return 0, wrapCommentOperationError("list GitHub PR comments", err)
 		}
 		for _, comment := range comments {
 			if strings.Contains(comment.Body, commentMarker) {
@@ -91,33 +91,43 @@ func (w PRCommentWriter) findExistingCommentID(ctx context.Context, reportCtx Re
 func (w PRCommentWriter) createComment(ctx context.Context, reportCtx ReportContext, token, body string) error {
 	payload, err := json.Marshal(map[string]string{"body": body})
 	if err != nil {
-		return err
+		return wrapCommentOperationError("create GitHub PR comment", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.apiURL()+"/repos/"+reportCtx.RepositoryOwner+"/"+reportCtx.RepositoryName+"/issues/"+fmt.Sprintf("%d", reportCtx.PullRequestNumber)+"/comments", bytes.NewReader(payload))
 	if err != nil {
-		return err
+		return wrapCommentOperationError("create GitHub PR comment", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	return w.doNoContent(req)
+	if err := w.doNoContent(req); err != nil {
+		return wrapCommentOperationError("create GitHub PR comment", err)
+	}
+	return nil
 }
 
 func (w PRCommentWriter) updateComment(ctx context.Context, reportCtx ReportContext, token string, commentID int64, body string) error {
 	payload, err := json.Marshal(map[string]string{"body": body})
 	if err != nil {
-		return err
+		return wrapCommentOperationError("update GitHub PR comment", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, w.apiURL()+"/repos/"+reportCtx.RepositoryOwner+"/"+reportCtx.RepositoryName+"/issues/comments/"+fmt.Sprintf("%d", commentID), bytes.NewReader(payload))
 	if err != nil {
-		return err
+		return wrapCommentOperationError("update GitHub PR comment", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	return w.doNoContent(req)
+	if err := w.doNoContent(req); err != nil {
+		return wrapCommentOperationError("update GitHub PR comment", err)
+	}
+	return nil
+}
+
+func wrapCommentOperationError(operation string, err error) error {
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 func (w PRCommentWriter) doJSON(req *http.Request, out any) error {
