@@ -160,6 +160,117 @@ func TestPRCommentWriterFindsExistingMarkerCommentAcrossPages(t *testing.T) {
 	}
 }
 
+func TestPRCommentWriterReportsLookupFailureWithPaginationContext(t *testing.T) {
+	t.Parallel()
+
+	var requests []string
+	writer := PRCommentWriter{
+		Getenv: envMap(map[string]string{
+			"GITHUB_TOKEN": "token",
+		}),
+		HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requests = append(requests, req.Method+" "+req.URL.Path)
+			switch req.Method {
+			case http.MethodGet:
+				return jsonResponse(http.StatusInternalServerError, "lookup failed"), nil
+			default:
+				t.Fatalf("unexpected method %s", req.Method)
+				return nil, nil
+			}
+		}),
+	}
+
+	err := writer.Write(context.Background(), ReportContext{
+		RepositoryOwner:   "shotomorisk",
+		RepositoryName:    "kgh",
+		PullRequestNumber: 17,
+	}, commentMarker+"\nbody")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if got := err.Error(); !strings.Contains(got, "list GitHub PR comments") {
+		t.Fatalf("expected lookup context, got %q", got)
+	}
+	if got := err.Error(); !strings.Contains(got, "lookup failed") {
+		t.Fatalf("expected API body in error, got %q", got)
+	}
+	if len(requests) != 1 || requests[0] != "GET /repos/shotomorisk/kgh/issues/17/comments" {
+		t.Fatalf("unexpected requests: %v", requests)
+	}
+}
+
+func TestPRCommentWriterReportsCreateFailureWithOperationContext(t *testing.T) {
+	t.Parallel()
+
+	writer := PRCommentWriter{
+		Getenv: envMap(map[string]string{
+			"GITHUB_TOKEN": "token",
+		}),
+		HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.Method {
+			case http.MethodGet:
+				return jsonResponse(http.StatusOK, `[]`), nil
+			case http.MethodPost:
+				return jsonResponse(http.StatusBadGateway, "create failed"), nil
+			default:
+				t.Fatalf("unexpected method %s", req.Method)
+				return nil, nil
+			}
+		}),
+	}
+
+	err := writer.Write(context.Background(), ReportContext{
+		RepositoryOwner:   "shotomorisk",
+		RepositoryName:    "kgh",
+		PullRequestNumber: 17,
+	}, commentMarker+"\nbody")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if got := err.Error(); !strings.Contains(got, "create GitHub PR comment") {
+		t.Fatalf("expected create context, got %q", got)
+	}
+	if got := err.Error(); !strings.Contains(got, "create failed") {
+		t.Fatalf("expected API body in error, got %q", got)
+	}
+}
+
+func TestPRCommentWriterReportsUpdateFailureWithOperationContext(t *testing.T) {
+	t.Parallel()
+
+	writer := PRCommentWriter{
+		Getenv: envMap(map[string]string{
+			"GITHUB_TOKEN": "token",
+		}),
+		HTTPClient: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.Method {
+			case http.MethodGet:
+				return jsonResponse(http.StatusOK, `[{"id":123,"body":"`+commentMarker+` old"}]`), nil
+			case http.MethodPatch:
+				return jsonResponse(http.StatusServiceUnavailable, "update failed"), nil
+			default:
+				t.Fatalf("unexpected method %s", req.Method)
+				return nil, nil
+			}
+		}),
+	}
+
+	err := writer.Write(context.Background(), ReportContext{
+		RepositoryOwner:   "shotomorisk",
+		RepositoryName:    "kgh",
+		PullRequestNumber: 17,
+	}, commentMarker+"\nbody")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if got := err.Error(); !strings.Contains(got, "update GitHub PR comment") {
+		t.Fatalf("expected update context, got %q", got)
+	}
+	if got := err.Error(); !strings.Contains(got, "update failed") {
+		t.Fatalf("expected API body in error, got %q", got)
+	}
+}
+
 func TestPRCommentWriterRejectsMissingToken(t *testing.T) {
 	t.Parallel()
 
@@ -198,7 +309,7 @@ func TestPRCommentWriterWrapsHTTPError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	if got := err.Error(); got != "upsert GitHub PR comment: boom" {
+	if got := err.Error(); got != "upsert GitHub PR comment: list GitHub PR comments: boom" {
 		t.Fatalf("unexpected error %q", got)
 	}
 }
