@@ -57,6 +57,32 @@ func TestReportContextResolverResolveNonPullRequest(t *testing.T) {
 	}
 }
 
+func TestReportContextResolverResolveWorkflowDispatchWithoutPullRequest(t *testing.T) {
+	t.Parallel()
+
+	ctx, err := ReportContextResolver{
+		Getenv: envMap(map[string]string{
+			"GITHUB_EVENT_NAME": "workflow_dispatch",
+			"GITHUB_REPOSITORY": "shotomorisk/kgh",
+			"GITHUB_SERVER_URL": "https://github.example.com",
+			"GITHUB_RUN_ID":     "42",
+		}),
+		ReadFile: os.ReadFile,
+	}.Resolve()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if ctx.HasPullRequest() {
+		t.Fatalf("expected no pull request context, got %+v", ctx)
+	}
+	if ctx.RepositoryOwner != "shotomorisk" || ctx.RepositoryName != "kgh" {
+		t.Fatalf("unexpected repository split %+v", ctx)
+	}
+	if ctx.RunURL != "https://github.example.com/shotomorisk/kgh/actions/runs/42" {
+		t.Fatalf("unexpected run url %q", ctx.RunURL)
+	}
+}
+
 func TestReportContextResolverResolveWorkflowDispatchOverride(t *testing.T) {
 	t.Parallel()
 

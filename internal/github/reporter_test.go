@@ -96,6 +96,29 @@ func TestRunReporterSkipsCommentOutsidePullRequest(t *testing.T) {
 	}
 }
 
+func TestRunReporterSkipsCommentForWorkflowDispatchWithoutPullRequest(t *testing.T) {
+	t.Parallel()
+
+	commentWriter := &fakeCommentWriter{}
+	reporter := RunReporter{
+		SummaryWriter: SummaryWriter{
+			Getenv: func(string) string { return "" },
+		},
+		ContextResolver: fakeReportContextResolver{
+			ctx: ReportContext{EventName: "workflow_dispatch"},
+		},
+		CommentWriter: commentWriter,
+	}
+
+	err := reporter.WriteExecutionReport(context.Background(), execution.Result{}, nil)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if commentWriter.calls != 0 {
+		t.Fatalf("expected no comment writes, got %d", commentWriter.calls)
+	}
+}
+
 func TestRunReporterAggregatesErrors(t *testing.T) {
 	t.Parallel()
 
