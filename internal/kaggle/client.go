@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -26,11 +27,7 @@ type Client struct {
 type osEnvSource struct{}
 
 func (osEnvSource) LookupEnv(key string) (string, bool) {
-	return lookupEnv(key)
-}
-
-func lookupEnv(key string) (string, bool) {
-	return syscallLookupEnv(key)
+	return os.LookupEnv(key)
 }
 
 // CommandError reports a non-zero Kaggle CLI process exit.
