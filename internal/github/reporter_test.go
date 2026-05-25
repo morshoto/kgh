@@ -58,6 +58,10 @@ func TestRunReporterWritesPullRequestComment(t *testing.T) {
 			Competition: "playground-series-s6e2",
 			Submit:      true,
 		},
+		Score: &execution.ScoreResult{
+			State:       execution.ScoreStateReady,
+			PublicScore: "0.12345",
+		},
 	}, nil)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -70,6 +74,9 @@ func TestRunReporterWritesPullRequestComment(t *testing.T) {
 	}
 	if !strings.Contains(commentWriter.body, "[workflow run](https://github.com/shotomorisk/kgh/actions/runs/42)") {
 		t.Fatalf("expected run URL in body, got %q", commentWriter.body)
+	}
+	if !strings.Contains(commentWriter.body, "| Current Score | 0.12345 |") {
+		t.Fatalf("expected current score in comparison scaffold, got %q", commentWriter.body)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/shotomorisk/kgh/internal/execution"
 	"github.com/shotomorisk/kgh/internal/reporting"
@@ -52,9 +53,24 @@ func (r RunReporter) WriteExecutionReport(ctx context.Context, result execution.
 	}
 
 	if err := r.CommentWriter.Write(ctx, reportCtx, reporting.RenderGitHubPRComment(result, reporting.GitHubCommentOptions{
-		RunURL: reportCtx.RunURL,
+		RunURL:     reportCtx.RunURL,
+		Comparison: buildGitHubCommentComparison(result),
 	})); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+func buildGitHubCommentComparison(result execution.Result) *reporting.GitHubCommentComparison {
+	if result.Score == nil {
+		return nil
+	}
+
+	comparison := &reporting.GitHubCommentComparison{
+		Label: "latest base branch run",
+	}
+	if currentScore := strings.TrimSpace(result.Score.PublicScore); currentScore != "" {
+		comparison.CurrentScore = currentScore
+	}
+	return comparison
 }

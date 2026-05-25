@@ -44,6 +44,34 @@ func TestRenderGitHubPRCommentShowsPlaceholderComparisonSectionWhenComparisonMis
 	assertContains(t, got, "| Delta | unavailable |")
 }
 
+func TestRenderGitHubPRCommentRendersComparisonCurrentScore(t *testing.T) {
+	t.Parallel()
+
+	got := RenderGitHubPRComment(execution.Result{
+		Execution: spec.ExecutionSpec{
+			TargetName:  "exp142",
+			Notebook:    "notebooks/exp142.ipynb",
+			KernelID:    "yourname/exp142",
+			KernelRef:   "yourname/exp142",
+			Competition: "playground-series-s6e2",
+			Submit:      true,
+		},
+		Score: &execution.ScoreResult{
+			State:       execution.ScoreStateReady,
+			PublicScore: "0.12345",
+		},
+	}, GitHubCommentOptions{
+		Comparison: &GitHubCommentComparison{
+			Label:        "latest base branch run",
+			CurrentScore: "0.12345",
+		},
+	})
+
+	assertContains(t, got, "### Comparison")
+	assertContains(t, got, "| Baseline | `latest base branch run` |")
+	assertContains(t, got, "| Current Score | 0.12345 |")
+}
+
 func TestRenderGitHubPRCommentCoversDryRunVariant(t *testing.T) {
 	t.Parallel()
 
