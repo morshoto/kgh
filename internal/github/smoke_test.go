@@ -10,9 +10,16 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/shotomorisk/kgh/internal/config"
+	"github.com/shotomorisk/kgh/internal/execution"
+	"github.com/shotomorisk/kgh/internal/kaggle"
+	"github.com/shotomorisk/kgh/internal/reporting"
+	"github.com/shotomorisk/kgh/internal/spec"
 )
 
 const smokeCommentUpsertEnv = "KGH_GITHUB_COMMENT_SMOKE"
+const smokeTargetName = "smoke-submit"
 
 func TestSmokePRCommentUpsertLive(t *testing.T) {
 	if os.Getenv(smokeCommentUpsertEnv) != "1" {
@@ -32,8 +39,8 @@ func TestSmokePRCommentUpsertLive(t *testing.T) {
 	}
 
 	writer := NewPRCommentWriter()
-	bodyOne := smokeCommentBody("first pass")
-	bodyTwo := smokeCommentBody("second pass")
+	bodyOne := smokeReportBody("0.12345")
+	bodyTwo := smokeReportBody("0.23456")
 
 	if err := writer.Write(context.Background(), reportCtx, bodyOne); err != nil {
 		t.Fatalf("first comment write: %v", err)
@@ -57,6 +64,21 @@ func TestSmokePRCommentUpsertLive(t *testing.T) {
 	if len(markerBodies) != 1 {
 		t.Fatalf("expected exactly 1 marker comment, got %d", len(markerBodies))
 	}
+	if !strings.Contains(markerBodies[0], "## kgh run report") {
+		t.Fatalf("expected rendered report heading, got %q", markerBodies[0])
+	}
+	if !strings.Contains(markerBodies[0], "### Overview") {
+		t.Fatalf("expected overview section, got %q", markerBodies[0])
+	}
+	if !strings.Contains(markerBodies[0], "Public Score: 0.23456") {
+		t.Fatalf("expected updated public score, got %q", markerBodies[0])
+	}
+	if !strings.Contains(markerBodies[0], "### Resolved Configuration") {
+		t.Fatalf("expected resolved configuration section, got %q", markerBodies[0])
+	}
+	if !strings.Contains(markerBodies[0], "### Comparison") {
+		t.Fatalf("expected comparison section, got %q", markerBodies[0])
+	}
 	if !strings.Contains(markerBodies[0], bodyTwo) {
 		t.Fatalf("expected comment body to contain second write payload, got %q", markerBodies[0])
 	}
@@ -65,10 +87,48 @@ func TestSmokePRCommentUpsertLive(t *testing.T) {
 	}
 }
 
-func smokeCommentBody(label string) string {
-	return commentMarker + "\n" +
-		"## kgh comment smoke\n" +
-		"- label: " + label + "\n"
+func smokeReportBody(score string) string {
+	result := execution.Result{
+		Execution: spec.ExecutionSpec{
+			TargetName:  smokeTargetName,
+			Notebook:    "notebooks/" + smokeTargetName + ".ipynb",
+			KernelID:    "yourname/" + smokeTargetName,
+			KernelRef:   "yourname/" + smokeTargetName,
+			Competition: "playground-series-s6e2",
+			Submit:      true,
+			Resources: config.Resources{
+				GPU:      true,
+				Internet: false,
+			},
+			Outputs: config.Outputs{
+				Submission: "outputs/submission.csv",
+				Metrics:    "outputs/metrics.json",
+			},
+		},
+		Poll: &execution.PollResult{
+			Status:   "complete",
+			Terminal: kaggle.KernelPollTerminalStateSucceeded,
+		},
+		Submission: &execution.SubmissionResult{
+			Attempted:    true,
+			Submitted:    true,
+			SubmissionID: "sub-123",
+			Status:       "complete",
+			Message:      "submit from smoke",
+		},
+		Score: &execution.ScoreResult{
+			State:       execution.ScoreStateReady,
+			PublicScore: score,
+		},
+	}
+
+	return reporting.RenderGitHubPRComment(result, reporting.GitHubCommentOptions{
+		RunURL: "https://github.com/morshoto/kgh/actions/runs/42",
+		Comparison: &reporting.GitHubCommentComparison{
+			Label:        "latest base branch run",
+			CurrentScore: score,
+		},
+	})
 }
 
 func listPRComments(ctx context.Context, writer PRCommentWriter, reportCtx ReportContext) ([]struct {
