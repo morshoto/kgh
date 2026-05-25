@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.0.11](https://github.com/morshoto/kgh/compare/v0.0.10...v0.0.11) - 2026-05-25
+- fix(gh-comment): harden PR comment error handling by @morshoto in https://github.com/morshoto/kgh/pull/136
+- Lock down PR comment rendering contract and output coverage by @morshoto in https://github.com/morshoto/kgh/pull/137
+- Fix undefined syscallLookupEnv by @morshoto in https://github.com/morshoto/kgh/pull/140
+- Tighten PR reporting context resolution and graceful skip behavior by @morshoto in https://github.com/morshoto/kgh/pull/141
+- [codex] GitHub comment smoke test by @morshoto in https://github.com/morshoto/kgh/pull/142
+
 ## [v0.0.10](https://github.com/morshoto/kgh/compare/v0.0.9...v0.0.10) - 2026-05-14
 - cmd: emit GitHub summaries for github run by @morshoto in https://github.com/morshoto/kgh/pull/98
 - execution: degrade gracefully on score lookup failures by @morshoto in https://github.com/morshoto/kgh/pull/99
