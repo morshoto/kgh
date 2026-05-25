@@ -32,13 +32,10 @@ func RenderGitHubPRComment(result execution.Result, opts GitHubCommentOptions) s
 
 	b.WriteString("<!-- kgh:run-report -->\n")
 	b.WriteString("## kgh run report\n")
-	b.WriteString("| Field | Value |\n")
+	b.WriteString("\n### Overview\n")
+	b.WriteString("| Details | Score |\n")
 	b.WriteString("| --- | --- |\n")
-	writeCommentRow(&b, "Target", formatIdentifier(valueOr(result.Execution.TargetName, stateUnavailable)))
-	writeCommentRow(&b, "Run Status", resolveRunStatus(result))
-	writeCommentRow(&b, "Submission Result", resolveSubmissionResult(result))
-	writeCommentRow(&b, "Public Score", resolvePublicScore(result))
-	writeCommentRow(&b, "References", formatCommentReferences(result, opts.RunURL))
+	writeOverviewRow(&b, renderCommentOverviewDetails(result, opts.RunURL), renderCommentScore(result, comparison))
 
 	b.WriteString("\n### Resolved Configuration\n")
 	b.WriteString("| Field | Value |\n")
@@ -66,6 +63,26 @@ func RenderGitHubPRComment(result execution.Result, opts GitHubCommentOptions) s
 
 func writeCommentRow(b *strings.Builder, field, value string) {
 	fmt.Fprintf(b, "| %s | %s |\n", escapeMarkdown(field), value)
+}
+
+func writeOverviewRow(b *strings.Builder, details, score string) {
+	fmt.Fprintf(b, "| %s | %s |\n", details, score)
+}
+
+func renderCommentOverviewDetails(result execution.Result, runURL string) string {
+	parts := make([]string, 0, 4)
+	parts = append(parts, fmt.Sprintf("Target: %s", formatIdentifier(valueOr(result.Execution.TargetName, stateUnavailable))))
+	parts = append(parts, fmt.Sprintf("Run Status: %s", resolveRunStatus(result)))
+	parts = append(parts, fmt.Sprintf("Submission Result: %s", resolveSubmissionResult(result)))
+	parts = append(parts, fmt.Sprintf("References: %s", formatCommentReferences(result, runURL)))
+	return strings.Join(parts, "<br>")
+}
+
+func renderCommentScore(result execution.Result, comparison *GitHubCommentComparison) string {
+	if comparison != nil && strings.TrimSpace(comparison.CurrentScore) != "" {
+		return fmt.Sprintf("Public Score: %s", strings.TrimSpace(comparison.CurrentScore))
+	}
+	return fmt.Sprintf("Public Score: %s", resolvePublicScore(result))
 }
 
 func resolveSubmissionResult(result execution.Result) string {
