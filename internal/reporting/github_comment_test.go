@@ -37,6 +37,10 @@ func TestRenderGitHubPRCommentShowsPlaceholderComparisonSectionWhenComparisonMis
 		RunURL: "https://github.com/shotomorisk/kgh/actions/runs/42",
 	})
 
+	assertContains(t, got, "### Overview")
+	assertContains(t, got, "| Details | Score |")
+	assertContains(t, got, "Target: `exp142`<br>Run Status: unavailable<br>Submission Result: submitted<br>status: complete<br>id: `123`")
+	assertContains(t, got, "Public Score: 0.12345")
 	assertContains(t, got, "### Comparison")
 	assertContains(t, got, "| Baseline | unavailable |")
 	assertContains(t, got, "| Baseline Score | unavailable |")
@@ -67,6 +71,9 @@ func TestRenderGitHubPRCommentRendersComparisonCurrentScore(t *testing.T) {
 		},
 	})
 
+	assertContains(t, got, "### Overview")
+	assertContains(t, got, "| Details | Score |")
+	assertContains(t, got, "Public Score: 0.12345")
 	assertContains(t, got, "### Comparison")
 	assertContains(t, got, "| Baseline | `latest base branch run` |")
 	assertContains(t, got, "| Current Score | 0.12345 |")
@@ -87,9 +94,10 @@ func TestRenderGitHubPRCommentCoversDryRunVariant(t *testing.T) {
 		},
 	}, GitHubCommentOptions{})
 
-	assertContains(t, got, "| Run Status | dry-run |")
-	assertContains(t, got, "| Submission Result | dry-run |")
-	assertContains(t, got, "| Public Score | unavailable |")
+	assertContains(t, got, "### Overview")
+	assertContains(t, got, "Run Status: dry-run")
+	assertContains(t, got, "Submission Result: dry-run")
+	assertContains(t, got, "Public Score: unavailable")
 	assertContains(t, got, "### Resolved Configuration")
 }
 
@@ -120,8 +128,8 @@ func TestRenderGitHubPRCommentCoversSubmittedVariant(t *testing.T) {
 		},
 	}, GitHubCommentOptions{})
 
-	assertContains(t, got, "| Submission Result | submitted<br>status: complete<br>id: `123` |")
-	assertContains(t, got, "| Public Score | 0.12345 |")
+	assertContains(t, got, "Submission Result: submitted<br>status: complete<br>id: `123`")
+	assertContains(t, got, "Public Score: 0.12345")
 	assertContains(t, got, "| Kernel Ref | `yourname/exp142` |")
 }
 
@@ -136,8 +144,8 @@ func TestRenderGitHubPRCommentCoversDisabledSubmitVariant(t *testing.T) {
 	}, GitHubCommentOptions{})
 
 	assertContains(t, got, "| Submit | false |")
-	assertContains(t, got, "| Submission Result | disabled |")
-	assertContains(t, got, "| Public Score | unavailable |")
+	assertContains(t, got, "Submission Result: disabled")
+	assertContains(t, got, "Public Score: unavailable")
 }
 
 func TestRenderGitHubPRCommentRendersWorkflowRunLink(t *testing.T) {

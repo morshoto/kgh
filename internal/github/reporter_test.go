@@ -75,7 +75,7 @@ func TestRunReporterWritesPullRequestComment(t *testing.T) {
 	if !strings.Contains(commentWriter.body, "[workflow run](https://github.com/shotomorisk/kgh/actions/runs/42)") {
 		t.Fatalf("expected run URL in body, got %q", commentWriter.body)
 	}
-	if !strings.Contains(commentWriter.body, "| Current Score | 0.12345 |") {
+	if !strings.Contains(commentWriter.body, "Public Score: 0.12345") {
 		t.Fatalf("expected current score in comparison scaffold, got %q", commentWriter.body)
 	}
 }
