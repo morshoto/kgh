@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/shotomorisk/kgh/internal/execution"
 	"github.com/shotomorisk/kgh/internal/reporting"
@@ -20,21 +19,32 @@ type reportContextResolver interface {
 
 // RunReporter publishes execution results to GitHub-facing surfaces.
 type RunReporter struct {
-	SummaryWriter   SummaryWriter
-	ContextResolver reportContextResolver
-	CommentWriter   commentWriter
+	SummaryWriter    SummaryWriter
+	ContextResolver  reportContextResolver
+	CommentWriter    commentWriter
+	BaselineResolver baselineResolver
 }
 
 func NewRunReporter() RunReporter {
 	return RunReporter{
-		SummaryWriter:   NewSummaryWriter(),
-		ContextResolver: NewReportContextResolver(),
-		CommentWriter:   NewPRCommentWriter(),
+		SummaryWriter:    NewSummaryWriter(),
+		ContextResolver:  NewReportContextResolver(),
+		CommentWriter:    NewPRCommentWriter(),
+		BaselineResolver: NewBaselineResolver(),
 	}
+}
+
+func (r RunReporter) PrepareExecutionReport(ctx context.Context, result execution.Result) (execution.Result, error) {
+	return r.enrichComparison(ctx, result)
 }
 
 func (r RunReporter) WriteExecutionReport(ctx context.Context, result execution.Result, failure *execution.FailureSummary) error {
 	var errs []error
+
+	enrichedResult, err := r.enrichComparison(ctx, result)
+	if err == nil {
+		result = enrichedResult
+	}
 
 	if err := r.SummaryWriter.WriteExecutionSummary(result, failure); err != nil {
 		errs = append(errs, fmt.Errorf("write GitHub summary: %w", err))
@@ -54,23 +64,27 @@ func (r RunReporter) WriteExecutionReport(ctx context.Context, result execution.
 
 	if err := r.CommentWriter.Write(ctx, reportCtx, reporting.RenderGitHubPRComment(result, reporting.GitHubCommentOptions{
 		RunURL:     reportCtx.RunURL,
-		Comparison: buildGitHubCommentComparison(result),
+		Comparison: result.Comparison,
 	})); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
 
-func buildGitHubCommentComparison(result execution.Result) *reporting.GitHubCommentComparison {
-	if result.Score == nil {
-		return nil
+func (r RunReporter) enrichComparison(ctx context.Context, result execution.Result) (execution.Result, error) {
+	if result.Comparison != nil {
+		return result, nil
 	}
 
-	comparison := &reporting.GitHubCommentComparison{
-		Label: "latest base branch run",
+	reportCtx, err := r.ContextResolver.Resolve()
+	if err != nil || !reportCtx.HasPullRequest() {
+		return result, nil
 	}
-	if currentScore := strings.TrimSpace(result.Score.PublicScore); currentScore != "" {
-		comparison.CurrentScore = currentScore
+
+	comparison, err := r.BaselineResolver.Resolve(ctx, reportCtx, result)
+	if err != nil || comparison == nil {
+		return result, nil
 	}
-	return comparison
+	result.Comparison = comparison
+	return result, nil
 }
