@@ -17,6 +17,8 @@ type ReportContext struct {
 	RepositoryOwner   string
 	RepositoryName    string
 	PullRequestNumber int
+	BaseBranch        string
+	WorkflowPath      string
 	RunURL            string
 }
 
@@ -48,6 +50,9 @@ func (r ReportContextResolver) Resolve() (ReportContext, error) {
 	ctx := ReportContext{
 		EventName:  strings.TrimSpace(r.Getenv("GITHUB_EVENT_NAME")),
 		Repository: strings.TrimSpace(r.Getenv("GITHUB_REPOSITORY")),
+		WorkflowPath: parseWorkflowPath(
+			r.Getenv("GITHUB_WORKFLOW_REF"),
+		),
 	}
 	ctx.RepositoryOwner, ctx.RepositoryName = splitRepository(ctx.Repository)
 	ctx.RunURL = buildRunURL(
@@ -63,10 +68,16 @@ func (r ReportContextResolver) Resolve() (ReportContext, error) {
 		}
 		ctx.PullRequestNumber = number
 	}
+	if baseBranch := strings.TrimSpace(r.Getenv("KGH_BASE_BRANCH")); baseBranch != "" {
+		ctx.BaseBranch = baseBranch
+	}
 
 	switch ctx.EventName {
 	case "pull_request", "pull_request_target":
 		if ctx.PullRequestNumber > 0 {
+			if ctx.BaseBranch == "" {
+				ctx.BaseBranch = parseBaseBranchFromPullRequestPayload(r)
+			}
 			return ctx, nil
 		}
 		number, err := r.resolvePullRequestNumber()
@@ -74,12 +85,51 @@ func (r ReportContextResolver) Resolve() (ReportContext, error) {
 			return ReportContext{}, err
 		}
 		ctx.PullRequestNumber = number
+		if ctx.BaseBranch == "" {
+			ctx.BaseBranch = parseBaseBranchFromPullRequestPayload(r)
+		}
 	case "workflow_dispatch":
 	case "":
 		return ReportContext{}, fmt.Errorf("GITHUB_EVENT_NAME is required")
 	}
 
 	return ctx, nil
+}
+
+func parseWorkflowPath(workflowRef string) string {
+	workflowRef = strings.TrimSpace(workflowRef)
+	if workflowRef == "" {
+		return ""
+	}
+	path, _, ok := strings.Cut(workflowRef, "@")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(path)
+}
+
+func parseBaseBranchFromPullRequestPayload(r ReportContextResolver) string {
+	eventPath := strings.TrimSpace(r.Getenv("GITHUB_EVENT_PATH"))
+	if eventPath == "" {
+		return ""
+	}
+
+	body, err := r.ReadFile(eventPath)
+	if err != nil {
+		return ""
+	}
+
+	var payload struct {
+		PullRequest struct {
+			Base struct {
+				Ref string `json:"ref"`
+			} `json:"base"`
+		} `json:"pull_request"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.PullRequest.Base.Ref)
 }
 
 func (r ReportContextResolver) resolvePullRequestNumber() (int, error) {

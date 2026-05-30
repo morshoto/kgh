@@ -32,6 +32,10 @@ type githubExecutionReporter interface {
 	WriteExecutionReport(context.Context, execution.Result, *execution.FailureSummary) error
 }
 
+type githubExecutionReportPreparer interface {
+	PrepareExecutionReport(context.Context, execution.Result) (execution.Result, error)
+}
+
 type githubTriggerResolver interface {
 	Resolve(context.Context) (parser.Trigger, error)
 }
@@ -167,6 +171,15 @@ func executeRequest(ctx context.Context, req execution.Request, stdout, stderr i
 		return 1, execErr
 	}
 
+	githubReporter := newGitHubReporter()
+	if writeGitHubReport {
+		if preparer, ok := githubReporter.(githubExecutionReportPreparer); ok {
+			if enriched, err := preparer.PrepareExecutionReport(ctx, report); err == nil {
+				report = enriched
+			}
+		}
+	}
+
 	payload, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return 1, fmt.Errorf("marshal run output: %w", err)
@@ -176,7 +189,7 @@ func executeRequest(ctx context.Context, req execution.Request, stdout, stderr i
 		return 1, err
 	}
 	if writeGitHubReport {
-		if err := newGitHubReporter().WriteExecutionReport(ctx, report, failure); err != nil {
+		if err := githubReporter.WriteExecutionReport(ctx, report, failure); err != nil {
 			return 1, fmt.Errorf("write GitHub report: %w", err)
 		}
 	}

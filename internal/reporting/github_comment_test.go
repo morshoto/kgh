@@ -66,8 +66,10 @@ func TestRenderGitHubPRCommentRendersComparisonCurrentScore(t *testing.T) {
 		},
 	}, GitHubCommentOptions{
 		Comparison: &GitHubCommentComparison{
-			Label:        "latest base branch run",
-			CurrentScore: "0.12345",
+			Label:         "main",
+			BaselineScore: "0.11111",
+			CurrentScore:  "0.12345",
+			Delta:         "+0.01234",
 		},
 	})
 
@@ -75,8 +77,10 @@ func TestRenderGitHubPRCommentRendersComparisonCurrentScore(t *testing.T) {
 	assertContains(t, got, "| Details | Score |")
 	assertContains(t, got, "Public Score: 0.12345")
 	assertContains(t, got, "### Comparison")
-	assertContains(t, got, "| Baseline | `latest base branch run` |")
+	assertContains(t, got, "| Baseline | `main` |")
+	assertContains(t, got, "| Baseline Score | 0.11111 |")
 	assertContains(t, got, "| Current Score | 0.12345 |")
+	assertContains(t, got, "| Delta | +0.01234 |")
 }
 
 func TestRenderGitHubPRCommentCoversDryRunVariant(t *testing.T) {

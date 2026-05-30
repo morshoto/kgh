@@ -22,6 +22,11 @@ type fakeReportContextResolver struct {
 	err error
 }
 
+type fakeBaselineResolver struct {
+	comparison *execution.ComparisonResult
+	err        error
+}
+
 func (f *fakeCommentWriter) Write(_ context.Context, _ ReportContext, body string) error {
 	f.calls++
 	f.body = body
@@ -30,6 +35,10 @@ func (f *fakeCommentWriter) Write(_ context.Context, _ ReportContext, body strin
 
 func (f fakeReportContextResolver) Resolve() (ReportContext, error) {
 	return f.ctx, f.err
+}
+
+func (f fakeBaselineResolver) Resolve(context.Context, ReportContext, execution.Result) (*execution.ComparisonResult, error) {
+	return f.comparison, f.err
 }
 
 func TestRunReporterWritesPullRequestComment(t *testing.T) {
@@ -47,6 +56,14 @@ func TestRunReporterWritesPullRequestComment(t *testing.T) {
 			},
 		},
 		CommentWriter: commentWriter,
+		BaselineResolver: fakeBaselineResolver{
+			comparison: &execution.ComparisonResult{
+				Label:         "main",
+				BaselineScore: "0.12345",
+				CurrentScore:  "0.23456",
+				Delta:         "+0.11111",
+			},
+		},
 	}
 
 	err := reporter.WriteExecutionReport(context.Background(), execution.Result{
@@ -75,8 +92,14 @@ func TestRunReporterWritesPullRequestComment(t *testing.T) {
 	if !strings.Contains(commentWriter.body, "[workflow run](https://github.com/shotomorisk/kgh/actions/runs/42)") {
 		t.Fatalf("expected run URL in body, got %q", commentWriter.body)
 	}
-	if !strings.Contains(commentWriter.body, "Public Score: 0.12345") {
-		t.Fatalf("expected current score in comparison scaffold, got %q", commentWriter.body)
+	if !strings.Contains(commentWriter.body, "Public Score: 0.23456") {
+		t.Fatalf("expected comparison current score in scaffold, got %q", commentWriter.body)
+	}
+	if !strings.Contains(commentWriter.body, "| Baseline Score | 0.12345 |") {
+		t.Fatalf("expected baseline score in comparison, got %q", commentWriter.body)
+	}
+	if !strings.Contains(commentWriter.body, "| Delta | +0.11111 |") {
+		t.Fatalf("expected delta in comparison, got %q", commentWriter.body)
 	}
 }
 

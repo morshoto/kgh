@@ -44,6 +44,16 @@ func RenderGitHubSummary(result execution.Result, opts GitHubSummaryOptions) str
 	for _, row := range rows {
 		fmt.Fprintf(&b, "| %s | %s |\n", escapeMarkdown(row.Field), row.Value)
 	}
+
+	if comparison := result.Comparison; comparison != nil {
+		b.WriteString("\n### Comparison\n")
+		b.WriteString("| Field | Value |\n")
+		b.WriteString("| --- | --- |\n")
+		writeSummaryComparisonRow(&b, "Baseline", formatIdentifier(valueOr(comparison.Label, stateUnavailable)))
+		writeSummaryComparisonRow(&b, "Baseline Score", valueOr(strings.TrimSpace(comparison.BaselineScore), stateUnavailable))
+		writeSummaryComparisonRow(&b, "Current Score", valueOr(strings.TrimSpace(comparison.CurrentScore), stateUnavailable))
+		writeSummaryComparisonRow(&b, "Delta", valueOr(strings.TrimSpace(comparison.Delta), stateUnavailable))
+	}
 	return b.String()
 }
 
@@ -75,6 +85,10 @@ func renderGitHubFailureSummary(result execution.Result, failure execution.Failu
 type summaryRow struct {
 	Field string
 	Value string
+}
+
+func writeSummaryComparisonRow(b *strings.Builder, field, value string) {
+	fmt.Fprintf(b, "| %s | %s |\n", escapeMarkdown(field), value)
 }
 
 func resolveNotebookPath(result execution.Result) string {

@@ -11,17 +11,18 @@ func TestReportContextResolverResolvePullRequest(t *testing.T) {
 
 	dir := t.TempDir()
 	eventPath := filepath.Join(dir, "event.json")
-	if err := os.WriteFile(eventPath, []byte(`{"number":17}`), 0o644); err != nil {
+	if err := os.WriteFile(eventPath, []byte(`{"number":17,"pull_request":{"base":{"ref":"main"}}}`), 0o644); err != nil {
 		t.Fatalf("write event: %v", err)
 	}
 
 	ctx, err := ReportContextResolver{
 		Getenv: envMap(map[string]string{
-			"GITHUB_EVENT_NAME": "pull_request",
-			"GITHUB_EVENT_PATH": eventPath,
-			"GITHUB_REPOSITORY": "shotomorisk/kgh",
-			"GITHUB_SERVER_URL": "https://github.example.com",
-			"GITHUB_RUN_ID":     "42",
+			"GITHUB_EVENT_NAME":   "pull_request",
+			"GITHUB_EVENT_PATH":   eventPath,
+			"GITHUB_REPOSITORY":   "shotomorisk/kgh",
+			"GITHUB_SERVER_URL":   "https://github.example.com",
+			"GITHUB_RUN_ID":       "42",
+			"GITHUB_WORKFLOW_REF": ".github/workflows/commit-trigger.yml@refs/heads/main",
 		}),
 		ReadFile: os.ReadFile,
 	}.Resolve()
@@ -33,6 +34,12 @@ func TestReportContextResolverResolvePullRequest(t *testing.T) {
 	}
 	if ctx.RepositoryOwner != "shotomorisk" || ctx.RepositoryName != "kgh" {
 		t.Fatalf("unexpected repository split %+v", ctx)
+	}
+	if ctx.BaseBranch != "main" {
+		t.Fatalf("unexpected base branch %q", ctx.BaseBranch)
+	}
+	if ctx.WorkflowPath != ".github/workflows/commit-trigger.yml" {
+		t.Fatalf("unexpected workflow path %q", ctx.WorkflowPath)
 	}
 	if ctx.RunURL != "https://github.example.com/shotomorisk/kgh/actions/runs/42" {
 		t.Fatalf("unexpected run url %q", ctx.RunURL)
@@ -80,6 +87,29 @@ func TestReportContextResolverResolveWorkflowDispatchWithoutPullRequest(t *testi
 	}
 	if ctx.RunURL != "https://github.example.com/shotomorisk/kgh/actions/runs/42" {
 		t.Fatalf("unexpected run url %q", ctx.RunURL)
+	}
+}
+
+func TestReportContextResolverResolveWorkflowDispatchWithExplicitBaseBranch(t *testing.T) {
+	t.Parallel()
+
+	ctx, err := ReportContextResolver{
+		Getenv: envMap(map[string]string{
+			"GITHUB_EVENT_NAME":   "workflow_dispatch",
+			"GITHUB_REPOSITORY":   "shotomorisk/kgh",
+			"KGH_BASE_BRANCH":     "main",
+			"GITHUB_WORKFLOW_REF": ".github/workflows/commit-trigger.yml@refs/heads/main",
+		}),
+		ReadFile: os.ReadFile,
+	}.Resolve()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if ctx.BaseBranch != "main" {
+		t.Fatalf("unexpected base branch %q", ctx.BaseBranch)
+	}
+	if ctx.WorkflowPath != ".github/workflows/commit-trigger.yml" {
+		t.Fatalf("unexpected workflow path %q", ctx.WorkflowPath)
 	}
 }
 

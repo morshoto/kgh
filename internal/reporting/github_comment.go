@@ -9,12 +9,7 @@ import (
 )
 
 // GitHubCommentComparison is an optional comparison block for GitHub report surfaces.
-type GitHubCommentComparison struct {
-	Label         string
-	BaselineScore string
-	CurrentScore  string
-	Delta         string
-}
+type GitHubCommentComparison = execution.ComparisonResult
 
 // GitHubCommentOptions configures the GitHub PR comment renderer.
 type GitHubCommentOptions struct {
@@ -26,6 +21,9 @@ type GitHubCommentOptions struct {
 func RenderGitHubPRComment(result execution.Result, opts GitHubCommentOptions) string {
 	var b strings.Builder
 	comparison := opts.Comparison
+	if comparison == nil {
+		comparison = result.Comparison
+	}
 	if comparison == nil {
 		comparison = &GitHubCommentComparison{}
 	}

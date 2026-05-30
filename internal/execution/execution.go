@@ -63,6 +63,7 @@ type Result struct {
 	Outputs      *OutputsResult     `json:"outputs,omitempty"`
 	Submission   *SubmissionResult  `json:"submission,omitempty"`
 	Score        *ScoreResult       `json:"score,omitempty"`
+	Comparison   *ComparisonResult  `json:"comparison,omitempty"`
 }
 
 type BundleResult struct {
@@ -140,6 +141,13 @@ type ScoreResult struct {
 	Status       string    `json:"status,omitempty"`
 	PublicScore  string    `json:"public_score,omitempty"`
 	SubmittedAt  time.Time `json:"submitted_at,omitempty"`
+}
+
+type ComparisonResult struct {
+	Label         string `json:"label,omitempty"`
+	BaselineScore string `json:"baseline_score,omitempty"`
+	CurrentScore  string `json:"current_score,omitempty"`
+	Delta         string `json:"delta,omitempty"`
 }
 
 const (

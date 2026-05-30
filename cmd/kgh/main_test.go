@@ -26,8 +26,11 @@ type fakeTriggerResolver struct {
 }
 
 type fakeGitHubReporter struct {
-	calls int
-	err   error
+	calls         int
+	err           error
+	prepareResult execution.Result
+	prepareErr    error
+	hasPrepared   bool
 }
 
 func (f fakeExecutionRunner) Execute(context.Context, execution.Request) (execution.Result, error) {
@@ -41,6 +44,13 @@ func (f fakeTriggerResolver) Resolve(context.Context) (parser.Trigger, error) {
 func (f *fakeGitHubReporter) WriteExecutionReport(context.Context, execution.Result, *execution.FailureSummary) error {
 	f.calls++
 	return f.err
+}
+
+func (f *fakeGitHubReporter) PrepareExecutionReport(_ context.Context, result execution.Result) (execution.Result, error) {
+	if f.hasPrepared {
+		return f.prepareResult, f.prepareErr
+	}
+	return result, f.prepareErr
 }
 
 func TestExecuteRequestWritesJSONAndGitHubReport(t *testing.T) {
@@ -65,6 +75,22 @@ func TestExecuteRequestWritesJSONAndGitHubReport(t *testing.T) {
 		}
 	}
 	reporter := &fakeGitHubReporter{}
+	reporter.hasPrepared = true
+	reporter.prepareResult = execution.Result{
+		Mode: execution.ModeDryRun,
+		Execution: spec.ExecutionSpec{
+			TargetName: "exp142",
+			Notebook:   "notebooks/exp142.ipynb",
+			KernelID:   "yourname/exp142",
+			KernelRef:  "yourname/exp142",
+		},
+		Comparison: &execution.ComparisonResult{
+			Label:         "main",
+			BaselineScore: "0.12345",
+			CurrentScore:  "0.23456",
+			Delta:         "+0.11111",
+		},
+	}
 	newGitHubReporter = func() githubExecutionReporter {
 		return reporter
 	}
@@ -83,6 +109,9 @@ func TestExecuteRequestWritesJSONAndGitHubReport(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"target_name": "exp142"`) {
 		t.Fatalf("expected stdout JSON target, got %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"comparison": {`) {
+		t.Fatalf("expected stdout JSON comparison, got %s", stdout.String())
 	}
 	if reporter.calls != 1 {
 		t.Fatalf("expected 1 GitHub report write, got %d", reporter.calls)

@@ -80,6 +80,33 @@ func TestRenderGitHubSummaryLiveSuccess(t *testing.T) {
 	assertContains(t, got, "submission: `123`")
 }
 
+func TestRenderGitHubSummaryRendersComparisonSection(t *testing.T) {
+	t.Parallel()
+
+	got := RenderGitHubSummary(execution.Result{
+		Execution: spec.ExecutionSpec{
+			TargetName: "exp142",
+			Submit:     true,
+		},
+		Score: &execution.ScoreResult{
+			State:       execution.ScoreStateReady,
+			PublicScore: "0.23456",
+		},
+		Comparison: &execution.ComparisonResult{
+			Label:         "main",
+			BaselineScore: "0.12345",
+			CurrentScore:  "0.23456",
+			Delta:         "+0.11111",
+		},
+	}, GitHubSummaryOptions{})
+
+	assertContains(t, got, "### Comparison")
+	assertContains(t, got, "| Baseline | `main` |")
+	assertContains(t, got, "| Baseline Score | 0.12345 |")
+	assertContains(t, got, "| Current Score | 0.23456 |")
+	assertContains(t, got, "| Delta | +0.11111 |")
+}
+
 func TestRenderGitHubSummaryPendingScore(t *testing.T) {
 	t.Parallel()
 

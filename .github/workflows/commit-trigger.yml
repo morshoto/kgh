@@ -30,6 +30,7 @@ jobs:
             head_sha: ${{ steps.context.outputs.head_sha }}
             same_repo: ${{ steps.context.outputs.same_repo }}
             source: ${{ steps.context.outputs.source }}
+            base_ref: ${{ steps.context.outputs.base_ref }}
             should_run: ${{ steps.trigger.outputs.should_run }}
         steps:
             - name: Resolve trigger context
@@ -52,6 +53,7 @@ jobs:
                         headSha = context.payload.pull_request.head.sha;
                         headRepository = context.payload.pull_request.head.repo.full_name;
                         sameRepo = headRepository === repositoryFullName;
+                        core.setOutput('base_ref', context.payload.pull_request.base.ref);
                       } else if (context.eventName === 'workflow_dispatch') {
                         source = 'workflow_dispatch';
                         prNumber = core.getInput('pr_number', { required: true }).trim();
@@ -64,6 +66,7 @@ jobs:
                         headRepository = pullRequest.head.repo.full_name;
                         sameRepo = headRepository === repositoryFullName;
                         headSha = requestedHeadSha || pullRequest.head.sha;
+                        core.setOutput('base_ref', pullRequest.base.ref);
                         source = requestedHeadSha ? 'workflow_dispatch_exact_sha' : 'workflow_dispatch_pr_head';
                       } else {
                         core.setFailed(`unsupported event ${context.eventName}`);
@@ -175,6 +178,7 @@ jobs:
                   GITHUB_TOKEN: ${{ github.token }}
                   KGH_PULL_REQUEST_NUMBER: ${{ needs.resolve-trigger.outputs.pr_number }}
                   KGH_TRIGGER_SHA: ${{ needs.resolve-trigger.outputs.head_sha }}
+                  KGH_BASE_BRANCH: ${{ needs.resolve-trigger.outputs.base_ref }}
                   KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
                   KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
                   KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
